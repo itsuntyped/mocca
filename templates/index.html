@@ -1,0 +1,202 @@
+<!DOCTYPE html>
+<!--
+  Mocca - single-page web UI. Markup only; behavior lives in the ES modules
+  under static/js/ (entry point: main.js). No build step, no framework.
+-->
+<html lang="en" data-theme="dark">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Mocca - Brewed Locally</title>
+  <link rel="icon" type="image/x-icon" href="/static/images/favicon.ico" />
+  <link rel="icon" type="image/png" sizes="32x32" href="/static/images/favicon-32x32.png" />
+  <link rel="icon" type="image/png" sizes="16x16" href="/static/images/favicon-16x16.png" />
+  <link rel="apple-touch-icon" href="/static/images/apple-touch-icon.png" />
+  <link rel="stylesheet" href="/static/css/style.css" />
+</head>
+<body>
+  <!-- Banner shown when the inference engine isn't installed yet. -->
+  <div id="engine-banner" class="banner hidden">
+    The inference engine isn't installed. Run
+    <code>pip install llama-cpp-python</code> to chat with models, then
+    <button id="banner-retry" class="link-btn">retry</button>.
+  </div>
+
+  <div class="app">
+    <!-- Backdrop behind the sidebar drawer on small screens. -->
+    <div id="sidebar-backdrop" class="sidebar-backdrop hidden"></div>
+
+    <!-- Sidebar -->
+    <aside id="sidebar" class="sidebar">
+      <div class="sidebar-header">
+        <button id="new-chat" class="primary-btn" title="New chat">+ New chat</button>
+        <button id="new-folder" class="icon-btn" title="New folder" aria-label="New folder">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none"
+               stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M3 7a2 2 0 0 1 2-2h3.6l2 2H19a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z" />
+            <line x1="12" y1="11" x2="12" y2="16" />
+            <line x1="9.5" y1="13.5" x2="14.5" y2="13.5" />
+          </svg>
+        </button>
+      </div>
+
+      <nav id="session-list" class="session-list" aria-label="Chat sessions">
+        <!-- Folders and chat rows injected by sidebar.js -->
+      </nav>
+
+      <div class="sidebar-footer">
+        <button id="open-models" class="ghost-btn">Models</button>
+        <button id="open-settings" class="ghost-btn">Settings</button>
+      </div>
+    </aside>
+
+    <!-- Main -->
+    <main class="chat">
+      <!-- Slim bar shown only on small screens, to open the sidebar drawer. -->
+      <div class="mobile-bar">
+        <button id="menu-toggle" class="icon-btn" aria-label="Open menu">
+          <svg width="22" height="22" viewBox="0 0 24 24" fill="none"
+               stroke="currentColor" stroke-width="2" stroke-linecap="round">
+            <line x1="3" y1="6" x2="21" y2="6" />
+            <line x1="3" y1="12" x2="21" y2="12" />
+            <line x1="3" y1="18" x2="21" y2="18" />
+          </svg>
+        </button>
+        <span class="mobile-bar-title">Mocca</span>
+      </div>
+
+      <section id="messages" class="messages" aria-live="polite">
+        <div class="empty-state" id="empty-state">
+          <img class="brand-logo" src="/static/images/mocca.png" alt="Mocca" />
+          <p>Pick a model and start chatting. Everything runs locally.</p>
+        </div>
+      </section>
+
+      <form id="composer" class="composer">
+        <textarea
+          id="input"
+          class="input"
+          rows="1"
+          placeholder="Send a message…  (Enter to send, Shift+Enter for newline)"
+          autocomplete="off"
+        ></textarea>
+        <button id="send" type="submit" class="primary-btn send-btn">Send</button>
+      </form>
+    </main>
+  </div>
+
+  <!-- Settings modal -->
+  <dialog id="settings-modal" class="modal">
+    <form method="dialog" class="modal-body">
+      <h2>Settings</h2>
+
+      <label>System prompt
+        <textarea id="set-system" rows="3"></textarea>
+      </label>
+
+      <div class="row">
+        <label>Temperature
+          <input type="number" id="set-temp" step="0.1" min="0" max="2" />
+        </label>
+        <label>Top-p
+          <input type="number" id="set-topp" step="0.05" min="0" max="1" />
+        </label>
+        <label>Max tokens (≤0 = until full)
+          <input type="number" id="set-maxtokens" step="1" min="-1" />
+        </label>
+      </div>
+
+      <h3>Engine (applied on next model load)</h3>
+      <div class="row">
+        <label>Context size
+          <input type="number" id="set-nctx" step="256" min="512" />
+        </label>
+        <label>GPU layers (0 = CPU)
+          <input type="number" id="set-ngpu" step="1" min="0" />
+        </label>
+        <label>CPU threads (0 = auto)
+          <input type="number" id="set-nthreads" step="1" min="0" />
+        </label>
+      </div>
+
+      <label>Log level
+        <select id="set-loglevel">
+          <option>DEBUG</option><option>INFO</option>
+          <option>WARNING</option><option>ERROR</option>
+        </select>
+      </label>
+
+      <div class="modal-actions">
+        <button value="cancel" class="ghost-btn">Cancel</button>
+        <button id="save-settings" value="default" class="primary-btn">Save</button>
+      </div>
+    </form>
+  </dialog>
+
+  <!-- Models modal -->
+  <dialog id="models-modal" class="modal">
+    <div class="modal-body">
+      <h2>Models</h2>
+
+      <!-- Detected-hardware summary (filled in by models.js). -->
+      <div id="hw-summary" class="hw-summary"></div>
+
+      <!-- Active model: which downloaded model new chats use. -->
+      <label class="active-model-row">
+        <span>Active model</span>
+        <select id="model-select" class="model-select" title="Active model">
+          <option value="">No model - download one below</option>
+        </select>
+      </label>
+
+      <div class="tabs">
+        <button class="tab active" data-tab="browse">Recommended</button>
+        <button class="tab" data-tab="manual">Advanced</button>
+        <button class="tab" data-tab="installed">Installed</button>
+      </div>
+
+      <!-- Tab: curated, one-click downloads -->
+      <div id="tab-browse" class="tab-panel">
+        <p class="hint">
+          One-click downloads of small, capable models. Sizes are approximate;
+          1–3B models run on most laptops.
+        </p>
+        <div id="catalog" class="catalog"><!-- injected --></div>
+      </div>
+
+      <!-- Tab: manual Hugging Face download -->
+      <div id="tab-manual" class="tab-panel hidden">
+        <p class="hint">
+          Download any GGUF file from
+          <a href="https://huggingface.co/models?library=gguf" target="_blank" rel="noopener">Hugging Face</a>.
+          Enter the repository id and the exact <code>.gguf</code> filename.
+        </p>
+        <div class="manual-pull">
+          <input type="text" id="pull-repo" placeholder="repo id, e.g. bartowski/Llama-3.2-3B-Instruct-GGUF" />
+          <div class="pull-row">
+            <input type="text" id="pull-file" placeholder="filename, e.g. Llama-3.2-3B-Instruct-Q4_K_M.gguf" />
+            <button id="pull-btn" class="primary-btn">Download</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- Tab: installed models -->
+      <div id="tab-installed" class="tab-panel hidden">
+        <ul id="installed-models" class="installed-models"><!-- injected --></ul>
+      </div>
+
+      <!-- Shared download progress (visible across tabs while downloading) -->
+      <div id="pull-progress" class="pull-progress hidden">
+        <div class="bar"><div id="pull-bar-fill" class="bar-fill"></div></div>
+        <span id="pull-status" class="pull-status"></span>
+      </div>
+
+      <div class="modal-actions">
+        <button id="close-models" class="ghost-btn">Close</button>
+      </div>
+    </div>
+  </dialog>
+
+  <script type="module" src="/static/js/main.js"></script>
+</body>
+</html>

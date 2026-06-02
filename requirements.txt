@@ -1,0 +1,26 @@
+# Mocca - runtime dependencies.
+# Pinned with lower bounds. Tested on Python 3.11–3.12 (see note below).
+
+fastapi>=0.110          # Web framework / API layer
+uvicorn[standard]>=0.27 # ASGI server (the [standard] extra adds websockets, http-tools, etc.)
+httpx>=0.27             # Async HTTP client used to download models from Hugging Face
+jinja2>=3.1             # HTML templating for the single served page
+python-multipart>=0.0.9 # Form parsing
+pydantic>=2.6           # Request/response models
+
+# Local inference engine - runs GGUF models in-process (no external server).
+# Mocca imports this lazily, so the UI and model downloads still work even if it
+# fails to install; but you need it to actually chat.
+#
+# NOTE: prebuilt wheels exist for common platforms on Python 3.11–3.12. On very
+# new Python versions (e.g. 3.14) a wheel may not be published yet, forcing a
+# source build (which needs CMake + a C compiler). If install fails, either use
+# Python 3.11/3.12 or install a prebuilt wheel - see the project readme.
+llama-cpp-python>=0.2.79
+
+# Hardware-fit engine. Ships as a platform wheel that bundles the llmfit binary,
+# so 'pip install' provides the `llmfit` console script with no extra steps.
+# Mocca launches `llmfit serve` in the background on startup and queries its REST
+# API to detect RAM/GPU/VRAM and rate which models fit. If it's somehow missing,
+# Mocca still runs - it just hides the hardware hints.
+llmfit>=0.9.30

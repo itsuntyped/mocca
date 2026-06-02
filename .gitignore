@@ -1,0 +1,38 @@
+# Mocca runtime data - never commit user chats, logs, or local config.
+/data/
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+env/
+*.egg-info/
+.pytest_cache/
+
+# Packaging build artifacts (PyInstaller output).
+/packaging/windows/build/
+/packaging/windows/dist/
+
+# AI coding assistants
+.cursorrules
+AGENTS.md
+GEMINI.md
+.github/copilot-instructions.md
+.claude/settings.local.json
+CLAUDE.md
+CLAUDE.local.md
+.cursor/
+.windsurf/
+.continue/
+.codeium/
+.cody/
+.gemini/
+.codex/
+.aider*
+
+# Editors / OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
