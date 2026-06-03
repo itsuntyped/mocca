@@ -3,7 +3,7 @@ import { loadSidebar, createSession, createFolder, openSidebar, closeSidebar } f
 import { enableRootDrop } from "./dragdrop.js";
 import { sendMessage } from "./chat.js";
 import { openModels, pullManual, switchTab, checkHealth, loadModels } from "./models.js";
-import { loadSettings, saveSettings } from "./settings.js";
+import { loadSettings, saveSettings, loadDisplayPrefs } from "./settings.js";
 
 function boot() {
   // Sidebar actions.
@@ -51,6 +51,7 @@ function boot() {
   el("banner-retry").onclick = checkHealth;
 
   // Initial load.
+  loadDisplayPrefs();  // Set tool-call visibility before any chat renders.
   checkHealth();
   loadModels();
   loadSidebar();

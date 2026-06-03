@@ -35,6 +35,10 @@ DATA_DIR: Path = (
 )
 LOG_DIR: Path = DATA_DIR / "logs"
 MODELS_DIR: Path = DATA_DIR / "models"  # Downloaded .gguf model files live here.
+# Drop folder for documents the user wants the AI to read via the file tools.
+# Kept separate from the rest of data/ so those tools can never reach the
+# database, config, logs, or model files.
+FILES_DIR: Path = DATA_DIR / "files"
 
 CONFIG_FILE: Path = DATA_DIR / "config.json"
 DB_FILE: Path = DATA_DIR / "mocca.db"
@@ -49,3 +53,4 @@ def ensure_dirs() -> None:
     DATA_DIR.mkdir(parents=True, exist_ok=True)
     LOG_DIR.mkdir(parents=True, exist_ok=True)
     MODELS_DIR.mkdir(parents=True, exist_ok=True)
+    FILES_DIR.mkdir(parents=True, exist_ok=True)

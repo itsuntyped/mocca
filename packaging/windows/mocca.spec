@@ -4,26 +4,46 @@
 # dependencies first). Produces a one-folder app at packaging\windows\dist\Mocca
 # whose entry point is Mocca.exe.
 
+import glob
+import importlib.util
 import os
 
-from PyInstaller.utils.hooks import (
-    collect_data_files,
-    collect_dynamic_libs,
-    collect_submodules,
-)
+from PyInstaller.utils.hooks import collect_submodules
 
 # SPECPATH is the directory holding this spec (packaging/windows); the project
 # root is two levels up.
 PROJECT_ROOT = os.path.dirname(os.path.dirname(SPECPATH))
 LAUNCHER = os.path.join(SPECPATH, "launcher.py")
 
+
+def _package_dir(name):
+    """Locate an installed package's directory WITHOUT importing it.
+
+    We use find_spec rather than collect_dynamic_libs/import so the spec never
+    loads llama_cpp - importing the CUDA build on a machine with no NVIDIA driver
+    (e.g. a CI runner) fails, which would break the build. find_spec just reads
+    metadata.
+    """
+    spec = importlib.util.find_spec(name)
+    if spec and spec.submodule_search_locations:
+        return spec.submodule_search_locations[0]
+    return None
+
+# Build variant, set by build.ps1: "cpu" (default) or "cuda". The CUDA variant
+# bundles the CUDA runtime DLLs and produces a separate output folder. Whichever
+# llama-cpp-python build is installed in the build venv is what gets packaged;
+# this flag only controls the extra CUDA runtime DLLs and the output name.
+VARIANT = os.environ.get("MOCCA_BUILD_VARIANT", "cpu").lower()
+CUDA = VARIANT == "cuda"
+APP_DIR_NAME = "Mocca-CUDA" if CUDA else "Mocca"
+
 # Bundle the web assets at the archive root so src/paths.py finds them under
-# sys._MEIPASS, plus any data files llama.cpp ships.
+# sys._MEIPASS, plus the VERSION file so src/version.py reports the right version.
 datas = [
     (os.path.join(PROJECT_ROOT, "templates"), "templates"),
     (os.path.join(PROJECT_ROOT, "static"), "static"),
+    (os.path.join(PROJECT_ROOT, "VERSION"), "."),
 ]
-datas += collect_data_files("llama_cpp")
 
 # Bundle the standalone llmfit binary at the archive root so the app can run it
 # for hardware detection. If llmfit isn't installed, the build still works and
@@ -34,8 +54,35 @@ try:
 except Exception as exc:  # noqa: BLE001
     print(f"[mocca.spec] llmfit binary not bundled: {exc}")
 
-# llama.cpp's native shared libraries (the actual inference engine).
-binaries = collect_dynamic_libs("llama_cpp")
+# llama.cpp's native shared libraries (the actual inference engine), globbed from
+# the installed package's lib/ folder. This grabs whatever build is installed -
+# ggml-cpu.dll for the CPU build, or the much larger ggml-cuda.dll for the CUDA
+# build - without importing llama_cpp (see _package_dir).
+binaries = []
+_llama_dir = _package_dir("llama_cpp")
+if _llama_dir:
+    for dll in glob.glob(os.path.join(_llama_dir, "lib", "*.dll")):
+        binaries.append((dll, os.path.join("llama_cpp", "lib")))
+else:
+    print("[mocca.spec] WARNING: llama_cpp not installed; the build can't run models")
+
+# For the CUDA variant, also bundle the CUDA runtime DLLs (from the nvidia-*-cu12
+# wheels) right next to ggml-cuda.dll. llama-cpp-python's loader puts its lib/
+# folder on PATH, so placing cudart/cublas there lets ggml-cuda.dll resolve them
+# without a system CUDA Toolkit. (Without this, the CUDA build fails to load.)
+if CUDA:
+    nvidia_spec = importlib.util.find_spec("nvidia")
+    locations = list(nvidia_spec.submodule_search_locations) if nvidia_spec else []
+    cuda_dlls = []
+    for root in locations:
+        cuda_dlls += glob.glob(os.path.join(root, "*", "bin", "*.dll"))
+    if not cuda_dlls:
+        raise SystemExit(
+            "[mocca.spec] CUDA variant requested but no nvidia-*-cu12 runtime "
+            "DLLs found. Run 'python scripts/setup.py --cuda' in the build venv."
+        )
+    binaries += [(dll, os.path.join("llama_cpp", "lib")) for dll in cuda_dlls]
+    print(f"[mocca.spec] CUDA variant: bundling {len(cuda_dlls)} CUDA runtime DLL(s)")
 
 # uvicorn, pystray, and our own package pull in submodules dynamically, so
 # collect them explicitly rather than relying on static-import analysis.
@@ -73,5 +120,5 @@ coll = COLLECT(
     exe,
     a.binaries,
     a.datas,
-    name="Mocca",
+    name=APP_DIR_NAME,  # "Mocca" (CPU) or "Mocca-CUDA" - keeps both side by side.
 )

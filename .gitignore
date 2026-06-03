@@ -5,6 +5,8 @@
 __pycache__/
 *.py[cod]
 .venv/
+.venv-build-cpu/
+.venv-build-cuda/
 venv/
 env/
 *.egg-info/

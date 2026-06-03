@@ -20,6 +20,9 @@ from . import database, engine
 from .llmfit_service import service as llmfit
 from .paths import STATIC_DIR, TEMPLATES_DIR
 from .routes import chat, folders, models, sessions, system
+from .routes import tools as tools_routes
+from .tools import registry as tools
+from .version import __version__
 
 log = logging.getLogger("mocca.server")
 
@@ -32,6 +35,7 @@ async def lifespan(_app: FastAPI):
     background; on shutdown we stop it cleanly.
     """
     database.init_db()
+    tools.discover()  # Find and register all tools the AI can call.
     await llmfit.start()
     log.info("Mocca server started (engine available: %s)", engine.is_available())
     yield
@@ -39,7 +43,7 @@ async def lifespan(_app: FastAPI):
     log.info("Mocca server stopping")
 
 
-app = FastAPI(title="Mocca", version="0.1.0", docs_url="/api/docs", lifespan=lifespan)
+app = FastAPI(title="Mocca", version=__version__, docs_url="/api/docs", lifespan=lifespan)
 
 # Serve CSS/JS and the single HTML page.
 app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
@@ -58,3 +62,4 @@ app.include_router(models.router)
 app.include_router(folders.router)
 app.include_router(sessions.router)
 app.include_router(chat.router)
+app.include_router(tools_routes.router)

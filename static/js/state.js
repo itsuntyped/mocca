@@ -9,4 +9,5 @@ export const state = {
   catalog: [],
   sending: false,
   draggingId: null,      // Id of the chat currently being dragged, or null.
+  showToolCalls: false,  // Whether to render tool-call blocks (a display setting).
 };

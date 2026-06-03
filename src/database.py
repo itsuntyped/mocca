@@ -195,7 +195,9 @@ def get_session(session_id: str) -> dict[str, Any] | None:
         if row is None:
             return None
         msgs = conn.execute(
-            "SELECT * FROM messages WHERE session_id = ? ORDER BY created_at",
+            # rowid breaks ties when several messages share a (seconds-precision)
+            # timestamp, e.g. tool rows and the answer saved within one turn.
+            "SELECT * FROM messages WHERE session_id = ? ORDER BY created_at, rowid",
             (session_id,),
         ).fetchall()
     session = dict(row)
@@ -277,7 +279,8 @@ def get_messages(session_id: str) -> list[dict[str, Any]]:
     """Return all messages for a session in chronological order."""
     with _connect() as conn:
         rows = conn.execute(
-            "SELECT role, content FROM messages WHERE session_id = ? ORDER BY created_at",
+            "SELECT role, content FROM messages WHERE session_id = ? "
+            "ORDER BY created_at, rowid",
             (session_id,),
         ).fetchall()
     return [dict(r) for r in rows]

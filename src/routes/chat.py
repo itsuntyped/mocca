@@ -1,7 +1,8 @@
-"""Chat route: stream an assistant reply over Server-Sent Events."""
+"""Chat route: stream an assistant reply (possibly using tools) over SSE."""
 
 from __future__ import annotations
 
+import json
 import logging
 from typing import AsyncIterator
 
@@ -9,11 +10,16 @@ from fastapi import APIRouter, HTTPException
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
-from .. import config, database, engine
+from .. import config, database, engine, tool_loop
 from ..sse import sse
 
 log = logging.getLogger("mocca.chat")
 router = APIRouter()
+
+# Message roles that form the conversation the engine sees. Tool rows are stored
+# for display only and are rebuilt fresh each turn by the tool loop, so they're
+# excluded here to avoid feeding stale/unpaired tool messages back to the model.
+_ENGINE_ROLES = {"system", "user", "assistant"}
 
 
 class ChatRequest(BaseModel):
@@ -28,9 +34,9 @@ async def chat(req: ChatRequest) -> StreamingResponse:
 
     Flow:
       1. Persist the user's message.
-      2. Build the prompt: optional system prompt + full session history.
-      3. Stream tokens from the engine back to the browser as SSE.
-      4. Persist the complete assistant reply once streaming finishes.
+      2. Build the prompt: optional system prompt + prior conversation.
+      3. Run the tool loop, streaming tool activity and the final answer as SSE.
+      4. Persist tool interactions (for display) and the complete answer.
     """
     session = database.get_session(req.session_id)
     if session is None:
@@ -40,8 +46,8 @@ async def chat(req: ChatRequest) -> StreamingResponse:
     database.add_message(req.session_id, "user", req.message)
     database.set_session_model(req.session_id, req.model)
 
-    # Assemble the message list the engine expects.
-    history = database.get_messages(req.session_id)
+    # Assemble the conversation the engine sees (history minus display-only rows).
+    history = [m for m in database.get_messages(req.session_id) if m["role"] in _ENGINE_ROLES]
     messages: list[dict[str, str]] = []
     if settings.system_prompt.strip():
         messages.append({"role": "system", "content": settings.system_prompt})
@@ -55,15 +61,32 @@ async def chat(req: ChatRequest) -> StreamingResponse:
 
     async def event_stream() -> AsyncIterator[str]:
         collected: list[str] = []
+        # Tool call arguments stashed by id so we can store them with the result.
+        pending: dict[str, dict] = {}
         try:
-            async for chunk in engine.chat(req.model, messages, options=options):
-                collected.append(chunk)
-                yield sse({"chunk": chunk})
+            async for event in tool_loop.run(req.model, messages, options=options):
+                if "chunk" in event:
+                    collected.append(event["chunk"])
+                    yield sse({"chunk": event["chunk"]})
+                elif "tool_call" in event:
+                    call = event["tool_call"]
+                    pending[call["id"]] = call
+                    yield sse(event)
+                elif "tool_result" in event:
+                    result = event["tool_result"]
+                    call = pending.get(result["id"], {})
+                    # Persist a display-only record of this tool interaction.
+                    database.add_message(req.session_id, "tool", json.dumps({
+                        "name": result["name"],
+                        "arguments": call.get("arguments", {}),
+                        "result": result["result"],
+                    }))
+                    yield sse(event)
         except engine.EngineError as exc:
             log.error("Chat failed: %s", exc)
             yield sse({"error": str(exc)})
         finally:
-            # Always save whatever we managed to generate.
+            # Always save whatever final answer we managed to generate.
             reply = "".join(collected)
             if reply:
                 database.add_message(req.session_id, "assistant", reply)

@@ -126,6 +126,19 @@
         </select>
       </label>
 
+      <h3>Tools</h3>
+      <p class="hint">
+        What the assistant can do. Network tools reach the internet and are off
+        by default to keep Mocca fully local.
+      </p>
+
+      <label class="check-row">
+        <input type="checkbox" id="set-show-tools" />
+        Show tool calls in chat
+      </label>
+
+      <div id="tool-categories" class="tool-categories"><!-- injected by tools.js --></div>
+
       <div class="modal-actions">
         <button value="cancel" class="ghost-btn">Cancel</button>
         <button id="save-settings" value="default" class="primary-btn">Save</button>

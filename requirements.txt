@@ -16,6 +16,11 @@ pydantic>=2.6           # Request/response models
 # new Python versions (e.g. 3.14) a wheel may not be published yet, forcing a
 # source build (which needs CMake + a C compiler). If install fails, either use
 # Python 3.11/3.12 or install a prebuilt wheel - see the project readme.
+#
+# This is the CPU build. For NVIDIA/CUDA GPU acceleration, run
+# 'python scripts/setup.py' instead - it detects the GPU and swaps in the
+# prebuilt CUDA wheel plus the nvidia-*-cu12 runtime. See the readme's
+# "GPU acceleration" section.
 llama-cpp-python>=0.2.79
 
 # Hardware-fit engine. Ships as a platform wheel that bundles the llmfit binary,
