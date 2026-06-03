@@ -132,11 +132,38 @@
         Enable web search
       </label>
 
+      <h3>Memory</h3>
+      <button type="button" id="open-memory" class="ghost-btn">Manage memory</button>
+
       <div class="modal-actions">
         <button value="cancel" class="ghost-btn">Cancel</button>
         <button id="save-settings" value="default" class="primary-btn">Save</button>
       </div>
     </form>
+  </dialog>
+
+  <!-- Memory modal -->
+  <dialog id="memory-modal" class="modal">
+    <div class="modal-body">
+      <h2>Memory</h2>
+
+      <label class="check-row">
+        <input type="checkbox" id="set-memory" />
+        Let the AI remember facts about you across chats
+      </label>
+      <p class="hint" style="margin:0">
+        When on, the AI saves short, important facts about you (your name,
+        preferences, ...) and recalls them in future chats. Everything it has
+        learned is listed below - delete anything you don't want kept.
+      </p>
+
+      <div id="memory-list" class="memory-list"></div>
+
+      <div class="modal-actions">
+        <button type="button" id="clear-memory" class="ghost-btn memory-clear">Clear all</button>
+        <button type="button" id="close-memory" class="ghost-btn">Close</button>
+      </div>
+    </div>
   </dialog>
 
   <!-- Models modal -->

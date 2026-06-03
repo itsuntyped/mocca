@@ -22,6 +22,24 @@ router = APIRouter()
 _ENGINE_ROLES = {"system", "user", "assistant"}
 
 
+def _memory_block(memories: list[dict]) -> str:
+    """Render stored memories as a system-prompt block the model reads each turn.
+
+    This is the "recall" half of Mocca's memory: the ``remember`` tool saves
+    facts; here we surface them so the model carries that knowledge into every
+    conversation without it living in the chat history. We tell the model not to
+    announce that it has a memory, so recall feels natural rather than robotic.
+    """
+    lines = "\n".join(f"- {m['content']}" for m in memories)
+    return (
+        "Long-term memory - things you know about the user from past "
+        "conversations:\n"
+        f"{lines}\n"
+        "Use these facts naturally when they are relevant. Do not list them back "
+        "or mention that you have a memory unless the user asks."
+    )
+
+
 class ChatRequest(BaseModel):
     session_id: str
     model: str
@@ -48,9 +66,20 @@ async def chat(req: ChatRequest) -> StreamingResponse:
 
     # Assemble the conversation the engine sees (history minus display-only rows).
     history = [m for m in database.get_messages(req.session_id) if m["role"] in _ENGINE_ROLES]
+
+    # Compose the system message: the user's persona prompt, plus (when memory is
+    # on) a block of what the AI has learned about the user. We fold both into a
+    # single leading system message because many chat templates expect just one.
+    system_text = settings.system_prompt.strip()
+    if settings.enable_memory:
+        memories = database.list_memories()
+        if memories:
+            block = _memory_block(memories)
+            system_text = f"{system_text}\n\n{block}" if system_text else block
+
     messages: list[dict[str, str]] = []
-    if settings.system_prompt.strip():
-        messages.append({"role": "system", "content": settings.system_prompt})
+    if system_text:
+        messages.append({"role": "system", "content": system_text})
     messages.extend(history)
 
     options = {

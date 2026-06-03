@@ -44,6 +44,15 @@ _CATEGORY_HINTS: dict[str, list[str]] = {
     "web": ["search", "google", "web", "online", "internet", "latest", "news",
             "look up", "website", "url", "link", "github", "repo", "repository",
             "repositories", "browse", "fetch", "wiki"],
+    # Memory: phrases where the user reveals a durable fact about themselves or
+    # explicitly asks Mocca to remember something. Kept to fairly specific cues
+    # so ordinary chat doesn't drag the (extra) remember tool into every turn.
+    "memory": ["my name is", "call me", "i live", "i'm from", "i am from",
+               "i prefer", "i like", "i love", "i hate", "i dislike",
+               "my favorite", "my favourite", "i work", "i'm a", "i am a",
+               "remember", "don't forget", "do not forget", "keep in mind",
+               "note that", "for future", "from now on", "always", "my email",
+               "my birthday", "i use", "my job"],
 }
 
 # Modules in this package that are infrastructure, not tools.

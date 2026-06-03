@@ -154,6 +154,11 @@ async def run(
     user_text = next((m["content"] for m in reversed(messages) if m.get("role") == "user"), "")
     # All local tools are always available; web search is the one toggle.
     active = registry.active_categories(settings.enable_web_search)
+    # Memory has its own switch: when it's off, withhold the remember tool so the
+    # AI neither saves nor is offered to save anything (recall is gated too, in
+    # the chat route that injects stored memories into the system prompt).
+    if not settings.enable_memory:
+        active = [c for c in active if c != "memory"]
     categories = registry.relevant_categories(user_text, active)
     schemas = registry.schemas(categories)
 

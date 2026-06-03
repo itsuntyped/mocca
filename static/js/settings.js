@@ -12,8 +12,10 @@ export async function loadSettings() {
   el("set-ngpu").value = s.n_gpu_layers;
   el("set-nthreads").value = s.n_threads;
   el("set-loglevel").value = s.log_level;
-  // Web search is the only user-facing tool toggle; everything local stays on.
+  // Web search is the only network toggle; everything local stays on.
   el("set-web-search").checked = s.enable_web_search;
+  // Memory lives in its own modal (opened via the "Manage memory" button), so
+  // its toggle and list are handled there, not on this form.
 }
 
 // Persist the settings form, then close the modal.

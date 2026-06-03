@@ -2,11 +2,17 @@
 
 Why SQLite: it's in the Python standard library (no extra dependency),
 single-file, and trivially portable between Windows and Arch - which matches
-Mocca's "simple, local, no setup" goal. The schema is three tables:
+Mocca's "simple, local, no setup" goal. The schema is four tables:
 
     folders(id, name, created_at, updated_at)
     sessions(id, title, model, folder_id, favorite, created_at, updated_at)
     messages(id, session_id, role, content, created_at)
+    memories(id, content, created_at)
+
+``memories`` is Mocca's long-term, cross-chat memory: short, important facts
+about the user (their name, preferences, ...) that the AI saves via the
+``remember`` tool and that get injected into every conversation so the model
+"knows" them. It is global (not tied to a session) and small by design.
 
 ``sessions.folder_id`` is NULL for chats at the root, or a folders.id when the
 chat has been dragged into a folder. ``favorite`` (0/1) floats a chat to the
@@ -86,6 +92,12 @@ def init_db() -> None:
 
             CREATE INDEX IF NOT EXISTS idx_messages_session
                 ON messages(session_id, created_at);
+
+            CREATE TABLE IF NOT EXISTS memories (
+                id          TEXT PRIMARY KEY,
+                content     TEXT NOT NULL,
+                created_at  TEXT NOT NULL
+            );
             """
         )
         _migrate(conn)
@@ -284,3 +296,58 @@ def get_messages(session_id: str) -> list[dict[str, Any]]:
             (session_id,),
         ).fetchall()
     return [dict(r) for r in rows]
+
+
+# --------------------------------------------------------------------------- #
+# Memories (long-term, cross-chat facts about the user)
+# --------------------------------------------------------------------------- #
+
+def add_memory(content: str) -> dict[str, Any] | None:
+    """Store one durable fact about the user, returning it (or None if blank).
+
+    Memories are deduplicated case-insensitively so a model that re-saves the
+    same fact across turns doesn't pile up identical rows. When the content
+    already exists, the existing row is returned unchanged.
+    """
+    text = (content or "").strip()
+    if not text:
+        return None
+    with _connect() as conn:
+        existing = conn.execute(
+            "SELECT * FROM memories WHERE content = ? COLLATE NOCASE", (text,)
+        ).fetchone()
+        if existing is not None:
+            return dict(existing)
+        mid = _new_id()
+        ts = _now()
+        conn.execute(
+            "INSERT INTO memories (id, content, created_at) VALUES (?, ?, ?)",
+            (mid, text, ts),
+        )
+    log.debug("Stored memory %s", mid)
+    return {"id": mid, "content": text, "created_at": ts}
+
+
+def list_memories() -> list[dict[str, Any]]:
+    """Return all stored memories, oldest first (stable display order)."""
+    with _connect() as conn:
+        rows = conn.execute(
+            "SELECT * FROM memories ORDER BY created_at, rowid"
+        ).fetchall()
+    return [dict(r) for r in rows]
+
+
+def delete_memory(memory_id: str) -> bool:
+    """Delete one memory. Returns True if it existed."""
+    with _connect() as conn:
+        cur = conn.execute("DELETE FROM memories WHERE id = ?", (memory_id,))
+    log.debug("Deleted memory %s (existed=%s)", memory_id, cur.rowcount > 0)
+    return cur.rowcount > 0
+
+
+def clear_memories() -> int:
+    """Delete every memory, returning how many were removed."""
+    with _connect() as conn:
+        cur = conn.execute("DELETE FROM memories")
+    log.info("Cleared %d memories", cur.rowcount)
+    return cur.rowcount

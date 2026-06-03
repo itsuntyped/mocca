@@ -4,6 +4,7 @@ import { enableRootDrop } from "./dragdrop.js";
 import { sendMessage } from "./chat.js";
 import { openModels, pullManual, switchTab, checkHealth, loadModels } from "./models.js";
 import { loadSettings, saveSettings } from "./settings.js";
+import { openMemory, toggleMemory, clearMemories } from "./memory.js";
 
 function boot() {
   // Sidebar actions.
@@ -39,6 +40,13 @@ function boot() {
 
   // Settings modal.
   el("save-settings").onclick = saveSettings;
+
+  // Memory modal (opened from Settings). The toggle saves on change; there's no
+  // Save button, so flipping it takes effect immediately.
+  el("open-memory").onclick = openMemory;
+  el("close-memory").onclick = () => el("memory-modal").close();
+  el("clear-memory").onclick = clearMemories;
+  el("set-memory").onchange = toggleMemory;
 
   // Models modal.
   el("pull-btn").onclick = pullManual;
