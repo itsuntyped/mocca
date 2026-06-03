@@ -1,6 +1,15 @@
 # Attributions
 
-Third-party assets bundled with Mocca, and their required credits.
+Third-party assets and software bundled with Mocca, and their required credits.
+
+## Software
+
+- **llmfit** - used for hardware detection and model-fit ratings. Mocca bundles
+  the `llmfit` binary in its Windows builds and launches it locally; see
+  `src/llmfit_service.py`.
+
+  By Alexs Jones: <https://github.com/AlexsJones/llmfit> (refer to that
+  repository for its license terms).
 
 ## Icons
 
