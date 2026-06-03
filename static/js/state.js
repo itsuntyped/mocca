@@ -6,7 +6,7 @@ export const state = {
   collapsed: new Set(),  // Folder ids the user has collapsed (expanded by default).
   currentSessionId: null,
   models: [],
-  catalog: [],
+  catalog: [],          // Downloadable models from /api/catalog (HF-sourced).
   sending: false,
   draggingId: null,      // Id of the chat currently being dragged, or null.
 };

@@ -44,8 +44,11 @@ export async function loadModels() {
   renderCatalog();
 }
 
-// Load the recommended catalog (fit-annotated) and render it.
+// Load the downloadable catalog (HF-sourced, fit-annotated) and render it. It's
+// fetched live from Hugging Face, so show a loading note while it arrives.
 async function loadCatalog() {
+  const box = el("catalog");
+  if (box) box.innerHTML = `<div class="meta">Loading popular models…</div>`;
   try {
     const { catalog } = await api("/api/catalog");
     state.catalog = catalog;
@@ -92,20 +95,24 @@ function renderCatalog() {
       <span class="size">~${m.size_gb} GB</span>
       <button class="get-btn">${isInstalled ? "Installed" : "Download"}</button>`;
     const btn = item.querySelector(".get-btn");
-    if (isInstalled) {
-      // Already have it: leave the inert "Installed" button as rendered.
-    } else if (isDownloading && m.filename === downloadingFilename) {
-      // This is the model currently downloading: turn its button into Cancel.
-      btn.textContent = "Cancel";
-      btn.classList.add("cancel");
-      btn.onclick = cancelDownload;
-    } else if (isDownloading) {
-      // A different model is downloading: only one at a time, so disable.
-      btn.disabled = true;
-    } else {
-      btn.onclick = () => downloadModel(m.repo, m.filename);
-    }
+    applyDownloadButtonState(btn, m.repo, m.filename, isInstalled);
     box.appendChild(item);
+  }
+}
+
+// Set a Download button's state for the current download situation: the model
+// being fetched shows "Cancel", others are disabled (one download at a time),
+// and already-installed models keep their inert "Installed" label.
+function applyDownloadButtonState(btn, repo, filename, isInstalled) {
+  if (isInstalled) return;
+  if (isDownloading && filename === downloadingFilename) {
+    btn.textContent = "Cancel";
+    btn.classList.add("cancel");
+    btn.onclick = cancelDownload;
+  } else if (isDownloading) {
+    btn.disabled = true;
+  } else {
+    btn.onclick = () => downloadModel(repo, filename);
   }
 }
 

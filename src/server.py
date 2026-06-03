@@ -17,7 +17,6 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
 from . import database, engine
-from .llmfit_service import service as llmfit
 from .paths import STATIC_DIR, TEMPLATES_DIR
 from .routes import chat, folders, memory, models, sessions, system
 from .tools import registry as tools
@@ -50,17 +49,11 @@ class RevalidatingStaticFiles(StaticFiles):
 
 @asynccontextmanager
 async def lifespan(_app: FastAPI):
-    """Boot/shutdown tasks. (Logging/config are set up by run.py first.)
-
-    On startup we prepare storage and launch the bundled llmfit server in the
-    background; on shutdown we stop it cleanly.
-    """
+    """Boot/shutdown tasks. (Logging/config are set up by run.py first.)"""
     database.init_db()
     tools.discover()  # Find and register all tools the AI can call.
-    await llmfit.start()
     log.info("Mocca server started (engine available: %s)", engine.is_available())
     yield
-    await llmfit.stop()
     log.info("Mocca server stopping")
 
 

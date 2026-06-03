@@ -9,7 +9,6 @@ from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
 from .. import catalog, hardware, models
-from ..llmfit_service import service as llmfit
 from ..sse import sse
 
 router = APIRouter()
@@ -22,11 +21,12 @@ class DownloadRequest(BaseModel):
 
 @router.get("/api/catalog")
 async def get_catalog() -> dict[str, Any]:
-    """Return the curated models, each annotated with a hardware-fit rating."""
-    system = await llmfit.get_system()
+    """Return the downloadable models (from HF), each with a hardware-fit rating."""
+    system = hardware.detect_system()
+    entries = await catalog.get_catalog()
     items = [
         {**entry, "fit": hardware.fit_for_size(entry.get("size_gb"), system)}
-        for entry in catalog.CATALOG
+        for entry in entries
     ]
     return {"catalog": items}
 
@@ -34,7 +34,7 @@ async def get_catalog() -> dict[str, Any]:
 @router.get("/api/models")
 async def get_models() -> dict[str, Any]:
     """List downloaded models, each annotated with a hardware-fit rating."""
-    system = await llmfit.get_system()
+    system = hardware.detect_system()
     items = [
         {**m, "fit": hardware.fit_for_size(m["size"] / (1024 ** 3), system)}
         for m in models.list_local_models()

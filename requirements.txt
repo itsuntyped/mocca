@@ -23,9 +23,7 @@ pydantic>=2.6           # Request/response models
 # "GPU acceleration" section.
 llama-cpp-python>=0.2.79
 
-# Hardware-fit engine. Ships as a platform wheel that bundles the llmfit binary,
-# so 'pip install' provides the `llmfit` console script with no extra steps.
-# Mocca launches `llmfit serve` in the background on startup and queries its REST
-# API to detect RAM/GPU/VRAM and rate which models fit. If it's somehow missing,
-# Mocca still runs - it just hides the hardware hints.
-llmfit>=0.9.30
+# Note: hardware detection (RAM/CPU/GPU, for the model-fit hints) needs no extra
+# dependency - it uses the OS directly and nvidia-smi when present (see
+# src/hardware.py). The downloadable model catalog is fetched from the public
+# Hugging Face API with httpx (above); no client library or API key required.

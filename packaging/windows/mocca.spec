@@ -45,15 +45,6 @@ datas = [
     (os.path.join(PROJECT_ROOT, "VERSION"), "."),
 ]
 
-# Bundle the standalone llmfit binary at the archive root so the app can run it
-# for hardware detection. If llmfit isn't installed, the build still works and
-# the app degrades gracefully (no hardware hints).
-try:
-    from llmfit import find_llmfit_bin
-    datas += [(str(find_llmfit_bin()), ".")]
-except Exception as exc:  # noqa: BLE001
-    print(f"[mocca.spec] llmfit binary not bundled: {exc}")
-
 # llama.cpp's native shared libraries (the actual inference engine), globbed from
 # the installed package's lib/ folder. This grabs whatever build is installed -
 # ggml-cpu.dll for the CPU build, or the much larger ggml-cuda.dll for the CUDA

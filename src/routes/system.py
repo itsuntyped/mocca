@@ -1,4 +1,4 @@
-"""System routes: health, settings, hardware detection, and recommendations."""
+"""System routes: health, settings, and hardware detection."""
 
 from __future__ import annotations
 
@@ -7,7 +7,6 @@ from typing import Any
 from fastapi import APIRouter
 
 from .. import config, engine, hardware, models
-from ..llmfit_service import service as llmfit
 
 router = APIRouter()
 
@@ -47,41 +46,14 @@ async def put_settings(patch: dict[str, Any]) -> dict[str, Any]:
 
 @router.get("/api/hardware")
 async def get_hardware() -> dict[str, Any]:
-    """Report detected hardware (via the bundled llmfit server), for fit hints.
+    """Report detected hardware (RAM/CPU/GPU) for the model-fit hints.
 
-    ``available`` is False only if llmfit failed to start; the UI then shows a
-    neutral message instead of a hardware summary.
+    ``available`` is False only if detection failed (e.g. RAM unreadable); the
+    UI then shows a neutral message instead of a hardware summary.
     """
-    system = await llmfit.get_system()
+    system = hardware.detect_system()
     return {
         "available": system is not None,
         "summary": hardware.summarise(system),
         "system": system,
-    }
-
-
-@router.get("/api/recommendations")
-async def get_recommendations(limit: int = 8, min_fit: str = "good") -> dict[str, Any]:
-    """Return llmfit's top models for this machine (best fit first).
-
-    Powers the optional 'recommended for your hardware' list. Each entry keeps
-    llmfit's useful fields (name, params, fit_level, estimated speed, GGUF
-    sources) so the UI can show them and offer a download where available.
-    """
-    raw = await llmfit.get_top_models(limit=limit, min_fit=min_fit)
-    return {
-        "recommendations": [
-            {
-                "name": m.get("name"),
-                "provider": m.get("provider"),
-                "params": m.get("parameter_count"),
-                "fit_level": m.get("fit_level"),
-                "fit_label": m.get("fit_label"),
-                "estimated_tps": m.get("estimated_tps"),
-                "best_quant": m.get("best_quant"),
-                "use_case": m.get("use_case"),
-                "gguf_sources": m.get("gguf_sources", []),
-            }
-            for m in raw
-        ]
     }

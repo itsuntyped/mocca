@@ -343,13 +343,27 @@ class _Worker:
 
         log.info("Loading model %s (n_ctx=%d, n_gpu_layers=%d, n_threads=%d)",
                  model_name, s.n_ctx, s.n_gpu_layers, s.n_threads)
-        self._llm = Llama(
-            model_path=str(path),
-            n_ctx=s.n_ctx,
-            n_gpu_layers=s.n_gpu_layers,
-            n_threads=s.n_threads or None,  # None lets llama.cpp auto-pick.
-            verbose=False,
-        )
+        try:
+            self._llm = Llama(
+                model_path=str(path),
+                n_ctx=s.n_ctx,
+                n_gpu_layers=s.n_gpu_layers,
+                n_threads=s.n_threads or None,  # None lets llama.cpp auto-pick.
+                verbose=False,
+            )
+        except Exception as exc:  # noqa: BLE001 - llama.cpp raises bare ValueError
+            # llama.cpp's "Failed to load model from file" is cryptic. The usual
+            # cause is a model whose architecture is newer than the installed
+            # llama-cpp-python build (e.g. a brand-new model family), but it can
+            # also be a corrupt/incomplete file. Surface something actionable.
+            raise EngineError(
+                f"Could not load '{model_name}'. This usually means the model is "
+                "too new for the installed inference engine (llama-cpp-python) - "
+                "its architecture isn't supported yet. Try a different model "
+                "(e.g. a Llama, Qwen2.5, Gemma 2, or Phi model), or update "
+                "llama-cpp-python. If the problem persists the file may be "
+                "corrupt; delete and re-download it."
+            ) from exc
         self._signature = sig
         log.info("Model %s loaded", model_name)
 
