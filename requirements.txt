@@ -13,6 +13,12 @@ pydantic>=2.6           # Request/response models
 # lazily so a missing install never breaks startup.
 youtube-transcript-api>=1.0
 
+# Identifies the carrier for a tracking number and builds the carrier's official
+# tracking URL for the track_shipment tool. Pure Python, no API key, no network
+# (it parses the number against published carrier formats). Imported lazily so a
+# missing install never breaks startup.
+tracking-numbers>=0.1.8
+
 # Local inference engine - runs GGUF models in-process (no external server).
 # Mocca imports this lazily, so the UI and model downloads still work even if it
 # fails to install; but you need it to actually chat.

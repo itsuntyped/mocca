@@ -37,6 +37,19 @@ _URL = re.compile(r"https?://|www\.", re.IGNORECASE)
 # youtube category (not web), so a link gets the transcript tool rather than
 # fetch_url pulling the page's HTML.
 _YOUTUBE = re.compile(r"youtube\.com/(?:watch|shorts|embed|live)|youtu\.be/", re.IGNORECASE)
+# A token that structurally looks like a shipment tracking number, so a bare
+# follow-up ("how about this one? INTLCMI306283305") still routes to the shipping
+# tool even with no keyword. Deliberately conservative - it matches a few
+# well-defined shapes, not any alphanumeric blob, to avoid false positives:
+#   1Z + 16 alphanumerics              -> UPS
+#   INTL + more                        -> Intelcom
+#   2 letters + 9 digits + 2 letters   -> S10 international (China Post, Royal
+#                                         Mail, EMS, Deutsche Post, ...)
+#   12-34 digits                       -> USPS / FedEx numeric
+_TRACKING = re.compile(
+    r"\b(?:1Z[0-9A-Z]{16}|INTL[0-9A-Z]{6,}|[A-Z]{2}\d{9}[A-Z]{2}|\d{12,34})\b",
+    re.IGNORECASE,
+)
 _CATEGORY_HINTS: dict[str, list[str]] = {
     "math": ["calculate", "calculator", "compute", "convert", "conversion",
              "plus", "minus", "times", "multiply", "divide", "percent",
@@ -51,6 +64,14 @@ _CATEGORY_HINTS: dict[str, list[str]] = {
     # YouTube transcripts. The link itself is the strong signal (see _YOUTUBE);
     # these keywords catch phrasings around it.
     "youtube": ["youtube", "youtu.be", "transcript", "captions", "subtitles"],
+    # Shipment tracking. Keyword-driven only - tracking-number formats vary too
+    # widely to match structurally without false positives, and the tool validates
+    # the number itself once it runs. Carrier names are included so "where is my
+    # aliexpress order" reaches the tool.
+    "shipping": ["track", "tracking", "package", "parcel", "shipment", "courier",
+                 "delivery", "deliver", "where is my", "usps", "ups", "fedex",
+                 "dhl", "canada post", "royal mail", "china post", "deutsche post",
+                 "amazon", "aliexpress", "cainiao", "wish", "shopee", "intelcom"],
 }
 
 # Modules in this package that are infrastructure, not tools.
@@ -172,6 +193,10 @@ def relevant_categories(text: str, enabled_categories: list[str]) -> list[str]:
     # youtube transcript tool handles, so we don't also pull the page's HTML.
     if "web" in enabled and _URL.search(text) and not is_youtube:
         selected.add("web")
+    # A bare tracking-number-shaped token routes to shipping, so a keyword-less
+    # follow-up still reaches the tracking tool.
+    if "shipping" in enabled and _TRACKING.search(text):
+        selected.add("shipping")
 
     return sorted(selected)
 

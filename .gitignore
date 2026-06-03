@@ -18,6 +18,7 @@ env/
 
 # AI coding assistants
 .cursorrules
+.playwright-mcp/
 AGENTS.md
 GEMINI.md
 .github/copilot-instructions.md
