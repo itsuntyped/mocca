@@ -17,9 +17,13 @@ We deliberately keep only models small enough to be reasonable on ordinary
 hardware (see ``_MAX_SIZE_GB``); advanced users can still paste any repo +
 filename in the Advanced tab.
 
-If Hugging Face is unreachable, ``get_catalog()`` falls back to a small built-in
-list so the UI always has something to offer (graceful degradation). Results are
-cached for the process lifetime.
+If Hugging Face is unreachable, ``get_catalog()`` returns no models and an
+``"unavailable"`` status the UI turns into an offline message - we deliberately
+do *not* ship a stale built-in list, since downloads would fail anyway. Only
+successful results are cached (for the process lifetime), so a later attempt
+retries once connectivity returns. The catalog is prefetched at startup (see
+``server.py``) so the Models window opens instantly, and the UI offers a refresh
+that calls ``get_catalog(refresh=True)`` to rebuild it on demand.
 """
 
 from __future__ import annotations
@@ -72,28 +76,7 @@ _RESOLVE_BATCH = 8
 # fetches a single file, so these can't be installed in one click.
 _SHARD_RE = re.compile(r"\d{4,5}-of-\d{4,5}")
 
-# Built-in fallback used only when the Hugging Face API can't be reached. These
-# are known-good, single-file Q4_K_M GGUFs; filenames are pinned and may drift
-# upstream over time, but they exist purely as a safety net.
-_FALLBACK: list[dict[str, Any]] = [
-    {"name": "Llama 3.2 3B Instruct", "repo": "bartowski/Llama-3.2-3B-Instruct-GGUF",
-     "filename": "Llama-3.2-3B-Instruct-Q4_K_M.gguf", "size_gb": 2.0,
-     "description": "Meta's compact all-rounder. Great default for most laptops."},
-    {"name": "Llama 3.2 1B Instruct", "repo": "bartowski/Llama-3.2-1B-Instruct-GGUF",
-     "filename": "Llama-3.2-1B-Instruct-Q4_K_M.gguf", "size_gb": 0.8,
-     "description": "Tiny and fast. Runs comfortably on low-RAM machines."},
-    {"name": "Qwen2.5 3B Instruct", "repo": "bartowski/Qwen2.5-3B-Instruct-GGUF",
-     "filename": "Qwen2.5-3B-Instruct-Q4_K_M.gguf", "size_gb": 2.0,
-     "description": "Strong at reasoning, code, and multilingual chat."},
-    {"name": "Gemma 2 2B Instruct", "repo": "bartowski/gemma-2-2b-it-GGUF",
-     "filename": "gemma-2-2b-it-Q4_K_M.gguf", "size_gb": 1.7,
-     "description": "Google's small instruct model. Friendly and concise."},
-    {"name": "Phi 3.5 Mini Instruct", "repo": "bartowski/Phi-3.5-mini-instruct-GGUF",
-     "filename": "Phi-3.5-mini-instruct-Q4_K_M.gguf", "size_gb": 2.4,
-     "description": "Microsoft's capable 3.8B model; good at structured tasks."},
-]
-
-# Cached catalog for the process lifetime.
+# Cached catalog (successful HF fetches only) for the process lifetime.
 _cache: list[dict[str, Any]] | None = None
 
 
@@ -251,20 +234,26 @@ async def _fetch_from_hf() -> list[dict[str, Any]]:
     return out[:_LIMIT]
 
 
-async def get_catalog(refresh: bool = False) -> list[dict[str, Any]]:
-    """Return the downloadable catalog (HF-sourced, cached; fallback on failure)."""
+async def get_catalog(refresh: bool = False) -> dict[str, Any]:
+    """Return the downloadable catalog and a status.
+
+    Shape: ``{"models": [...], "source": "huggingface" | "unavailable"}``. A
+    successful fetch is cached for the process (``refresh=True`` rebuilds it).
+    When Hugging Face can't be reached we return no models and
+    ``"unavailable"`` - and do NOT cache that, so a later call (or the refresh
+    button) retries and recovers automatically once the connection is back.
+    """
     global _cache
     if _cache is not None and not refresh:
-        return _cache
+        return {"models": _cache, "source": "huggingface"}
     try:
         catalog = await _fetch_from_hf()
     except (httpx.HTTPError, ValueError) as exc:
         log.warning("Catalog fetch from Hugging Face failed: %s", exc)
         catalog = []
-    if not catalog:
-        log.info("Using built-in fallback catalog (%d entries)", len(_FALLBACK))
-        catalog = _FALLBACK
-    else:
+    if catalog:
         log.info("Built catalog from Hugging Face (%d entries)", len(catalog))
-    _cache = catalog
-    return _cache
+        _cache = catalog
+        return {"models": catalog, "source": "huggingface"}
+    log.warning("Catalog unavailable - Hugging Face could not be reached")
+    return {"models": [], "source": "unavailable"}

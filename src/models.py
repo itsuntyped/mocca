@@ -63,13 +63,24 @@ def has_any_model() -> bool:
 
 
 def delete_model(filename: str) -> bool:
-    """Delete a downloaded model. Returns True if the file existed."""
+    """Delete a downloaded model. Returns True if the file existed.
+
+    Raises :class:`ModelError` if the file can't be removed - most often on
+    Windows when the model is still loaded (llama.cpp memory-maps the GGUF, which
+    locks the file). The caller should unload it first (see ``engine.unload``).
+    """
     path = model_path(filename)
-    if path.exists():
+    if not path.exists():
+        return False
+    try:
         path.unlink()
-        log.info("Deleted model %s", path.name)
-        return True
-    return False
+    except OSError as exc:
+        raise ModelError(
+            f"Could not delete '{path.name}': {exc.strerror or exc}. If you were "
+            "just chatting with it, it may still be in use - try again in a moment."
+        ) from exc
+    log.info("Deleted model %s", path.name)
+    return True
 
 
 async def download_model(
@@ -115,6 +126,13 @@ async def download_model(
         log.info("Downloaded %s (%d bytes)", name, dest.stat().st_size)
         yield {"status": "Done", "completed": dest.stat().st_size, "total": dest.stat().st_size, "done": True}
     except httpx.HTTPError as exc:
+        # A transport error means we never reached Hugging Face (offline, DNS,
+        # dropped connection); say so plainly instead of dumping httpx internals.
+        if isinstance(exc, httpx.TransportError):
+            raise ModelError(
+                "Couldn't reach Hugging Face. Check your internet connection and "
+                "try again."
+            ) from exc
         raise ModelError(f"Download failed: {exc}") from exc
     finally:
         # Remove the partial file if it's still around. This covers a failed

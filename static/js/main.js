@@ -2,7 +2,7 @@ import { el, autoGrow } from "./dom.js";
 import { loadSidebar, createSession, createFolder, openSidebar, closeSidebar } from "./sidebar.js";
 import { enableRootDrop } from "./dragdrop.js";
 import { sendMessage } from "./chat.js";
-import { openModels, pullManual, switchTab, checkHealth, loadModels, cancelDownload } from "./models.js";
+import { openModels, pullManual, switchTab, checkHealth, loadModels, cancelDownload, refreshCatalog } from "./models.js";
 import { loadSettings, saveSettings } from "./settings.js";
 import { openMemory, toggleMemory, clearMemories } from "./memory.js";
 
@@ -51,6 +51,7 @@ function boot() {
   // Models modal.
   el("pull-btn").onclick = pullManual;
   el("pull-cancel").onclick = cancelDownload;
+  el("refresh-catalog").onclick = refreshCatalog;
   el("close-models").onclick = () => el("models-modal").close();
   for (const tab of document.querySelectorAll(".tab")) {
     tab.onclick = () => switchTab(tab.dataset.tab);

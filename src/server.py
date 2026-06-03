@@ -8,6 +8,7 @@ routers. Streaming endpoints use Server-Sent Events (see ``src/sse.py``).
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from contextlib import asynccontextmanager
 
@@ -16,7 +17,7 @@ from fastapi.responses import HTMLResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
-from . import database, engine
+from . import catalog, database, engine
 from .paths import STATIC_DIR, TEMPLATES_DIR
 from .routes import chat, folders, memory, models, sessions, system
 from .tools import registry as tools
@@ -52,8 +53,15 @@ async def lifespan(_app: FastAPI):
     """Boot/shutdown tasks. (Logging/config are set up by run.py first.)"""
     database.init_db()
     tools.discover()  # Find and register all tools the AI can call.
+    # Warm the model catalog from Hugging Face in the background so the Models
+    # window opens instantly. Non-blocking and non-fatal: get_catalog swallows
+    # network errors, so if we're offline it just doesn't populate (the UI shows
+    # an offline message and offers Refresh). Never delays or breaks startup.
+    prefetch = asyncio.create_task(catalog.get_catalog())
     log.info("Mocca server started (engine available: %s)", engine.is_available())
     yield
+    if not prefetch.done():
+        prefetch.cancel()
     log.info("Mocca server stopping")
 
 

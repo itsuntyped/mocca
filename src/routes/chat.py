@@ -23,20 +23,35 @@ _ENGINE_ROLES = {"system", "user", "assistant"}
 
 
 def _memory_block(memories: list[dict]) -> str:
-    """Render stored memories as a system-prompt block the model reads each turn.
+    """Render the long-term-memory section of the system prompt.
 
     This is the "recall" half of Mocca's memory: the ``remember`` tool saves
     facts; here we surface them so the model carries that knowledge into every
-    conversation without it living in the chat history. We tell the model not to
-    announce that it has a memory, so recall feels natural rather than robotic.
+    conversation without it living in the chat history.
+
+    It's included whenever memory is enabled - **even with nothing saved** - to
+    ground the model against fabrication. Without it, a model asked something it
+    has no memory for tends to invent an answer (e.g. "last time you said your
+    name was [previous name]"). So we list the real facts as the *only* personal
+    details it knows, and tell it to admit ignorance rather than guess; and when
+    there are none, we say so explicitly.
     """
-    lines = "\n".join(f"- {m['content']}" for m in memories)
+    if memories:
+        facts = "\n".join(f"- {m['content']}" for m in memories)
+        return (
+            "Long-term memory - the things you actually know about the user from "
+            "past conversations:\n"
+            f"{facts}\n"
+            "Use these facts naturally when relevant. They are the ONLY personal "
+            "details you know about the user: if asked about something not listed "
+            "here, say you don't know it yet rather than guessing or inventing it. "
+            "Do not announce that you have a memory unless the user asks."
+        )
     return (
-        "Long-term memory - things you know about the user from past "
-        "conversations:\n"
-        f"{lines}\n"
-        "Use these facts naturally when they are relevant. Do not list them back "
-        "or mention that you have a memory unless the user asks."
+        "Long-term memory: you have no saved facts about the user yet. Do not "
+        "claim to remember past conversations, and do not invent personal details "
+        "such as their name. If asked something personal you have not been told, "
+        "say you do not know it yet and offer to remember it."
     )
 
 
@@ -68,14 +83,14 @@ async def chat(req: ChatRequest) -> StreamingResponse:
     history = [m for m in database.get_messages(req.session_id) if m["role"] in _ENGINE_ROLES]
 
     # Compose the system message: the user's persona prompt, plus (when memory is
-    # on) a block of what the AI has learned about the user. We fold both into a
-    # single leading system message because many chat templates expect just one.
+    # on) the memory block - always, even when empty, so the model is grounded
+    # and won't fabricate remembered details (see _memory_block). We fold both
+    # into a single leading system message because many chat templates expect
+    # just one.
     system_text = settings.system_prompt.strip()
     if settings.enable_memory:
-        memories = database.list_memories()
-        if memories:
-            block = _memory_block(memories)
-            system_text = f"{system_text}\n\n{block}" if system_text else block
+        block = _memory_block(database.list_memories())
+        system_text = f"{system_text}\n\n{block}" if system_text else block
 
     messages: list[dict[str, str]] = []
     if system_text:

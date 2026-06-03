@@ -21,6 +21,7 @@ process. Design notes:
 from __future__ import annotations
 
 import asyncio
+import gc
 import importlib.util
 import json
 import logging
@@ -322,6 +323,35 @@ class _Worker:
         # Generation isn't thread-safe; one chat at a time per loaded model.
         self._lock = threading.Lock()
 
+    def unload(self, model_name: str | None = None) -> bool:
+        """Release the cached model so its file is no longer open.
+
+        Returns True if a model was unloaded. With ``model_name`` given, only
+        unloads when that specific model is the one loaded. This must run before
+        deleting a model file on Windows, where llama.cpp keeps the GGUF
+        memory-mapped (and the file locked) for as long as it's loaded.
+        """
+        with self._lock:
+            if self._llm is None:
+                return False
+            if model_name is not None and (
+                self._signature is None or self._signature[0] != model_name
+            ):
+                return False
+            # Llama.close() frees the model and unmaps the file; fall back to
+            # just dropping the reference if this build lacks it.
+            try:
+                close = getattr(self._llm, "close", None)
+                if callable(close):
+                    close()
+            except Exception:  # noqa: BLE001 - best-effort release, never fatal
+                log.debug("Error closing model", exc_info=True)
+            self._llm = None
+            self._signature = None
+            gc.collect()  # Prod CPython to drop the handle promptly (Windows).
+            log.info("Unloaded model")
+            return True
+
     def _load_if_needed(self, model_name: str) -> None:
         """(Re)load the model if the file or load-time settings changed."""
         s = config.get()
@@ -455,6 +485,16 @@ class _Worker:
 
 # Module-level singleton; the whole app shares one loaded model.
 _worker = _Worker()
+
+
+def unload(model_name: str | None = None) -> bool:
+    """Release the loaded model so its file can be deleted or replaced.
+
+    Pass a model filename to unload only that model if it's the one loaded;
+    pass nothing to unload whatever is loaded. Safe to call even when the engine
+    was never used (no model loaded) - it's a no-op then.
+    """
+    return _worker.unload(model_name)
 
 
 def supports_tools(model_name: str) -> bool:

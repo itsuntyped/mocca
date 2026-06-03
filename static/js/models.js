@@ -45,17 +45,31 @@ export async function loadModels() {
 }
 
 // Load the downloadable catalog (HF-sourced, fit-annotated) and render it. It's
-// fetched live from Hugging Face, so show a loading note while it arrives.
-async function loadCatalog() {
+// fetched live from Hugging Face, so show a loading note while it arrives. Pass
+// refresh=true (the Refresh button) to rebuild the list instead of using the
+// server's cached/prefetched copy.
+async function loadCatalog(refresh = false) {
   const box = el("catalog");
+  const btn = el("refresh-catalog");
   if (box) box.innerHTML = `<div class="meta">Loading popular models…</div>`;
+  if (btn) btn.disabled = true;
   try {
-    const { catalog } = await api("/api/catalog");
+    const { catalog, source } = await api("/api/catalog" + (refresh ? "?refresh=true" : ""));
     state.catalog = catalog;
+    state.catalogSource = source;
   } catch {
     state.catalog = [];
+    state.catalogSource = "unavailable";  // Server/HF unreachable -> show the note.
+  } finally {
+    if (btn) btn.disabled = false;
+    renderCatalog();
   }
-  renderCatalog();
+}
+
+// Re-fetch the catalog from Hugging Face (bypassing the cache). Wired to the
+// Refresh button - handy after reconnecting, or to pick up newly-popular models.
+export function refreshCatalog() {
+  loadCatalog(true);
 }
 
 // Names of installed models, for marking catalog entries as "installed".
@@ -83,6 +97,15 @@ function renderCatalog() {
   if (!box) return;
   const installed = installedNames();
   box.innerHTML = "";
+  // When Hugging Face couldn't be reached there are no models to show; explain
+  // why and point the user at Refresh (which retries once they're back online).
+  if (state.catalogSource === "unavailable") {
+    const note = document.createElement("div");
+    note.className = "catalog-note";
+    note.textContent = "Couldn't reach Hugging Face. Check your internet connection "
+      + "and use Refresh to try again. (Already-installed models still work offline.)";
+    box.appendChild(note);
+  }
   for (const m of state.catalog) {
     const isInstalled = installed.has(m.filename);
     const item = document.createElement("div");
@@ -100,11 +123,18 @@ function renderCatalog() {
   }
 }
 
-// Set a Download button's state for the current download situation: the model
-// being fetched shows "Cancel", others are disabled (one download at a time),
-// and already-installed models keep their inert "Installed" label.
+// Set a catalog button's state: an installed model shows "Remove" (delete it
+// right here, rather than a dead "Installed" label), the model being downloaded
+// shows "Cancel", others are disabled while a download runs (one at a time),
+// and otherwise it's a "Download" button.
 function applyDownloadButtonState(btn, repo, filename, isInstalled) {
-  if (isInstalled) return;
+  if (isInstalled) {
+    btn.textContent = "Remove";
+    btn.classList.add("remove");
+    if (isDownloading) btn.disabled = true;  // Not while another op is running.
+    else btn.onclick = () => deleteModel(filename);
+    return;
+  }
   if (isDownloading && filename === downloadingFilename) {
     btn.textContent = "Cancel";
     btn.classList.add("cancel");
@@ -213,8 +243,13 @@ export async function pullManual() {
 }
 
 async function deleteModel(name) {
-  if (!confirm(`Delete model "${name}"?`)) return;
-  await api(`/api/models/${name}`, { method: "DELETE" });
+  if (!confirm(`Remove "${prettyModelName(name)}"? This deletes the downloaded file.`)) return;
+  try {
+    await api(`/api/models/${name}`, { method: "DELETE" });
+  } catch (err) {
+    alert("Could not remove the model: " + err.message);
+    return;
+  }
   await loadModels();
   checkHealth();
 }

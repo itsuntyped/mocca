@@ -7,6 +7,7 @@ export const state = {
   currentSessionId: null,
   models: [],
   catalog: [],          // Downloadable models from /api/catalog (HF-sourced).
+  catalogSource: "huggingface",  // "fallback" when HF was unreachable.
   sending: false,
   draggingId: null,      // Id of the chat currently being dragged, or null.
 };

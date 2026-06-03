@@ -331,7 +331,18 @@ code {
 .fit-tight   { color: var(--text-dim); background: var(--grey-800); border-style: dashed; }
 .fit-too_big { color: var(--danger); border-color: var(--danger); background: transparent; }
 
+/* Recommended-tab header: intro text on the left, Refresh button on the right. */
+.catalog-head { display: flex; align-items: flex-start; gap: 12px; }
+.catalog-head .hint { flex: 1; margin: 0 0 14px; }
+.refresh-btn { flex: none; padding: 6px 14px; font-size: 13px; }
+
 .catalog { display: flex; flex-direction: column; gap: 8px; max-height: 360px; overflow-y: auto; }
+/* Shown in place of the list when Hugging Face is unreachable. */
+.catalog-note {
+  font-size: 13px; color: var(--text-mid); line-height: 1.5;
+  padding: 12px 14px; border: 1px solid var(--border); border-radius: var(--radius-sm);
+  background: var(--grey-800);
+}
 .catalog-item {
   display: flex; align-items: center; gap: 12px;
   padding: 12px; border: 1px solid var(--border); border-radius: var(--radius-sm);
@@ -361,12 +372,16 @@ code {
 .pull-status { font-size: 13px; color: var(--text-dim); }
 /* Shared "Cancel" control next to the progress status. */
 .pull-cancel { flex: none; padding: 4px 12px; font-size: 13px; color: var(--danger); }
-/* A catalog Download button turns into "Cancel" for the model being fetched. */
-.catalog-item .get-btn.cancel {
+/* A catalog button turns into "Cancel" for the model being fetched, or "Remove"
+   for one that's installed - both use the danger outline. The .remove rule also
+   overrides the dimmed "installed" button styling above so it reads as active. */
+.catalog-item .get-btn.cancel,
+.catalog-item.installed .get-btn.remove {
   background: transparent; border-color: var(--danger); color: var(--danger);
   opacity: 1; cursor: pointer;
 }
-.catalog-item .get-btn.cancel:hover { background: var(--grey-800); }
+.catalog-item .get-btn.cancel:hover,
+.catalog-item.installed .get-btn.remove:hover { background: var(--grey-800); }
 
 .installed-models { list-style: none; margin: 0; padding: 0; max-height: 200px; overflow-y: auto; }
 .installed-models li {

@@ -8,7 +8,7 @@ from fastapi import APIRouter, HTTPException
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
-from .. import catalog, hardware, models
+from .. import catalog, engine, hardware, models
 from ..sse import sse
 
 router = APIRouter()
@@ -20,15 +20,20 @@ class DownloadRequest(BaseModel):
 
 
 @router.get("/api/catalog")
-async def get_catalog() -> dict[str, Any]:
-    """Return the downloadable models (from HF), each with a hardware-fit rating."""
+async def get_catalog(refresh: bool = False) -> dict[str, Any]:
+    """Return the downloadable models (from HF), each with a hardware-fit rating.
+
+    ``source`` is ``"unavailable"`` (with no models) when Hugging Face couldn't
+    be reached, so the UI can show an offline message. ``refresh=true`` rebuilds
+    the list instead of using the cached one (the UI's Refresh button).
+    """
     system = hardware.detect_system()
-    entries = await catalog.get_catalog()
+    result = await catalog.get_catalog(refresh=refresh)
     items = [
         {**entry, "fit": hardware.fit_for_size(entry.get("size_gb"), system)}
-        for entry in entries
+        for entry in result["models"]
     ]
-    return {"catalog": items}
+    return {"catalog": items, "source": result["source"]}
 
 
 @router.get("/api/models")
@@ -44,7 +49,17 @@ async def get_models() -> dict[str, Any]:
 
 @router.delete("/api/models/{filename:path}")
 async def remove_model(filename: str) -> dict[str, str]:
-    """Delete a downloaded model. (``:path`` tolerates dotted filenames.)"""
+    """Delete a downloaded model. (``:path`` tolerates dotted filenames.)
+
+    If the model is the one currently loaded in the engine, we unload it first so
+    the file is no longer memory-mapped - otherwise Windows refuses to delete it.
+    """
+    try:
+        name = models.safe_filename(filename)
+    except models.ModelError:
+        name = filename
+    engine.unload(name)  # No-op unless this exact model is loaded.
+
     try:
         existed = models.delete_model(filename)
     except models.ModelError as exc:

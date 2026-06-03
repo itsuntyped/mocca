@@ -190,10 +190,14 @@
 
       <!-- Tab: popular one-click downloads (sourced live from Hugging Face) -->
       <div id="tab-browse" class="tab-panel">
-        <p class="hint">
-          Popular, capable GGUF models from Hugging Face. The badge shows how
-          each fits your hardware; 1–3B models run on most laptops.
-        </p>
+        <div class="catalog-head">
+          <p class="hint">
+            Popular, capable GGUF models from Hugging Face. The badge shows how
+            each fits your hardware; 1–3B models run on most laptops.
+          </p>
+          <button type="button" id="refresh-catalog" class="ghost-btn refresh-btn"
+                  title="Reload the list from Hugging Face">Refresh</button>
+        </div>
         <div id="catalog" class="catalog"><!-- injected --></div>
       </div>
 
