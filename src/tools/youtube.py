@@ -19,12 +19,25 @@ import logging
 import re
 from typing import Any
 
+import httpx
+
 from .base import Tool, ToolError
 
 log = logging.getLogger("mocca.tools")
 
+# YouTube's oEmbed endpoint: a no-auth, no-dependency way to get a video's title
+# and channel (richer context than the transcript alone). Best-effort only.
+_OEMBED = "https://www.youtube.com/oembed"
+
 # Cap the transcript so a long video can't blow past a small local context.
 _MAX_CHARS = 8_000
+# Transcript fetches are flaky (YouTube rate-limits / transient errors); a couple
+# of quick retries noticeably improves the hit rate.
+_MAX_ATTEMPTS = 2
+# Emit a [MM:SS] marker roughly every this-many seconds of speech, grouping the
+# text between markers onto one line. Gives the model timestamps to cite
+# ("around 3:45 they discuss X") without a noisy stamp on every short phrase.
+_STAMP_EVERY = 20.0
 
 # Pull an 11-char YouTube video id out of the common URL shapes: watch?v=,
 # youtu.be/, /shorts/, /embed/, /live/.
@@ -42,8 +55,8 @@ def _video_id(url: str) -> str | None:
     return url if _BARE_ID_RE.match(url) else None
 
 
-def _fetch_transcript(video_id: str) -> str:
-    """Fetch and flatten a transcript to plain text (blocking; run off-thread).
+def _fetch_segments(video_id: str) -> list[tuple[float, str]]:
+    """Fetch a transcript as (start_seconds, text) segments (blocking; off-thread).
 
     Supports both the modern instance API (youtube-transcript-api >= 1.0) and the
     older static ``get_transcript`` (<= 0.6). For non-English videos where the
@@ -57,11 +70,62 @@ def _fetch_transcript(video_id: str) -> str:
             fetched = api.fetch(video_id)
         except Exception:  # noqa: BLE001 - e.g. no English track; try any language
             fetched = next(iter(api.list(video_id))).fetch()
-        return " ".join(snippet.text for snippet in fetched)
+        return [(float(s.start), s.text.strip()) for s in fetched if s.text.strip()]
 
     # Legacy static API (<= 0.6): returns a list of {"text", "start", ...}.
     snippets = YouTubeTranscriptApi.get_transcript(video_id)
-    return " ".join(s["text"] for s in snippets)
+    return [(float(s.get("start", 0)), s["text"].strip())
+            for s in snippets if s.get("text", "").strip()]
+
+
+async def _fetch_metadata(video_id: str) -> tuple[str, str]:
+    """Best-effort video title + channel via YouTube's oEmbed endpoint.
+
+    Returns ``("", "")`` on any failure - metadata just enriches the context, so
+    it must never break transcript reading (no key, no extra dependency).
+    """
+    try:
+        async with httpx.AsyncClient(timeout=8.0, follow_redirects=True) as client:
+            resp = await client.get(_OEMBED, params={
+                "format": "json",
+                "url": f"https://www.youtube.com/watch?v={video_id}",
+            })
+            resp.raise_for_status()
+            data = resp.json()
+        return str(data.get("title", "")).strip(), str(data.get("author_name", "")).strip()
+    except (httpx.HTTPError, ValueError) as exc:
+        log.debug("YouTube oEmbed lookup failed for %s: %s", video_id, exc)
+        return "", ""
+
+
+def _format_timestamp(seconds: float) -> str:
+    """Seconds -> 'M:SS' (or 'H:MM:SS' for long videos)."""
+    total = int(seconds)
+    h, rem = divmod(total, 3600)
+    m, s = divmod(rem, 60)
+    return f"{h}:{m:02d}:{s:02d}" if h else f"{m}:{s:02d}"
+
+
+def _build_transcript(segments: list[tuple[float, str]]) -> str:
+    """Render segments into timestamped lines, one per ~``_STAMP_EVERY`` seconds.
+
+    Grouping keeps a short, citeable marker (e.g. ``[3:45] ...``) without a
+    timestamp on every two-word phrase, which would bloat the text and the
+    model's context.
+    """
+    lines: list[str] = []
+    bucket_start: float | None = None
+    bucket: list[str] = []
+    for start, text in segments:
+        if bucket_start is None or start - bucket_start >= _STAMP_EVERY:
+            if bucket:
+                lines.append(f"[{_format_timestamp(bucket_start)}] {' '.join(bucket)}")
+            bucket_start, bucket = start, [text]
+        else:
+            bucket.append(text)
+    if bucket and bucket_start is not None:
+        lines.append(f"[{_format_timestamp(bucket_start)}] {' '.join(bucket)}")
+    return "\n".join(lines)
 
 
 async def _run(args: dict[str, Any]) -> str:
@@ -72,20 +136,37 @@ async def _run(args: dict[str, Any]) -> str:
     if not video_id:
         raise ToolError("That doesn't look like a YouTube video URL.")
 
-    try:
-        text = await asyncio.to_thread(_fetch_transcript, video_id)
-    except ImportError as exc:
-        raise ToolError("The youtube-transcript-api package is not installed.") from exc
-    except Exception as exc:  # noqa: BLE001 - surface the library's own reason
+    # A couple of attempts with a short backoff - transcript fetches flake out.
+    segments: list[tuple[float, str]] | None = None
+    last_exc: Exception | None = None
+    for attempt in range(_MAX_ATTEMPTS):
+        try:
+            segments = await asyncio.to_thread(_fetch_segments, video_id)
+            break
+        except ImportError as exc:
+            raise ToolError("The youtube-transcript-api package is not installed.") from exc
+        except Exception as exc:  # noqa: BLE001 - surface the library's own reason
+            last_exc = exc
+            if attempt < _MAX_ATTEMPTS - 1:
+                await asyncio.sleep(1.0 * (attempt + 1))
+    if segments is None:
         # Covers disabled/unavailable transcripts, private/removed videos, etc.
-        raise ToolError(f"Could not get a transcript for this video: {exc}") from exc
-
-    text = text.strip()
-    if not text:
+        raise ToolError(f"Could not get a transcript for this video: {last_exc}")
+    if not segments:
         return "(the video has no transcript text)"
+
+    text = _build_transcript(segments)
     if len(text) > _MAX_CHARS:
         text = text[:_MAX_CHARS] + f"\n... [transcript truncated at {_MAX_CHARS} characters]"
-    return text
+
+    # Prepend the title/channel when we can get them (best-effort, never fatal).
+    title, channel = await _fetch_metadata(video_id)
+    header = ""
+    if title:
+        header += f"Title: {title}\n"
+    if channel:
+        header += f"Channel: {channel}\n"
+    return f"{header}\n{text}" if header else text
 
 
 TOOL = Tool(
@@ -93,8 +174,9 @@ TOOL = Tool(
     description=(
         "Read the transcript (spoken captions) of a YouTube video. Use this "
         "whenever the user gives a YouTube link (youtube.com or youtu.be) and "
-        "wants to know about, summarise, or ask questions about the video. Pass "
-        "the video URL as 'url'."
+        "wants to know about, summarise, or ask questions about the video. The "
+        "transcript includes [M:SS] timestamps you can cite. Pass the video URL "
+        "as 'url'."
     ),
     category="youtube",
     parameters={
