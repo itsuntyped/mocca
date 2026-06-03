@@ -46,9 +46,10 @@ sets this up automatically when it detects a GPU, but the details:
   CUDA wheels for 3.13/3.14 yet). You need a current NVIDIA driver, but **no**
   system CUDA Toolkit - the runtime comes from pip wheels (`nvidia-*-cu12`),
   which the app adds to the DLL search path at startup.
-- After setup, open **Settings** and set **GPU layers** to **99** to offload the
-  whole model. (The value caps to the model's real layer count; partial offload
-  is only needed for models too large for your VRAM.)
+- The CUDA build **defaults GPU layers to 99 on first run** (offloads the whole
+  model), so it uses the GPU out of the box. You can change it in **Settings** -
+  the value caps to the model's real layer count, and partial offload is only
+  needed for models too large for your VRAM. (The CPU build defaults to 0.)
 - Rough VRAM use for a 3B Q4 model is ~2.5 GB, so an 8 GB card has plenty of room
   - you can also raise **Context size** for longer chats.
 - To force or re-run: `python scripts/setup.py --cuda` (or `--cpu`). Verify with

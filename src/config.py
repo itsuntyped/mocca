@@ -82,12 +82,29 @@ def _known_keys() -> set[str]:
     return {f.name for f in fields(Settings)}
 
 
+def _default_gpu_layers() -> int:
+    """First-run default for n_gpu_layers.
+
+    On a CUDA (GPU) engine build, offload the whole model by default (99 caps to
+    the model's real layer count in llama.cpp); on a CPU build stay at 0. This is
+    why the CUDA download runs on the GPU out of the box. Only applied when the
+    config file doesn't exist yet, so it never overrides a user's choice. Lazily
+    imports engine to avoid a circular import; engine's own import is cheap (it
+    doesn't load llama_cpp here).
+    """
+    try:
+        from . import engine
+        return 99 if engine.is_cuda_build() else 0
+    except Exception:  # noqa: BLE001 - detection must never block config creation
+        return 0
+
+
 def load() -> Settings:
     """Load settings from disk (creating the file with defaults on first run)."""
     global _settings
     if not CONFIG_FILE.exists():
         log.info("No config file found; writing defaults to %s", CONFIG_FILE)
-        _settings = Settings()
+        _settings = Settings(n_gpu_layers=_default_gpu_layers())
         save(_settings)
         return _settings
 

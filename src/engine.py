@@ -21,9 +21,11 @@ process. Design notes:
 from __future__ import annotations
 
 import asyncio
+import importlib.util
 import json
 import logging
 import os
+import sys
 import threading
 import uuid
 from dataclasses import dataclass, field
@@ -105,6 +107,28 @@ def is_available() -> bool:
         return True
     except ImportError:
         return False
+
+
+def is_cuda_build() -> bool:
+    """Whether the installed llama-cpp-python is a CUDA (GPU) build.
+
+    Detected cheaply by the presence of ``ggml-cuda.dll`` in the package's lib
+    folder - via ``find_spec`` so we never import llama_cpp (no DLL load, no CUDA
+    init). Used to pick a sensible first-run default for ``n_gpu_layers``: the
+    CUDA build should offload to the GPU, the CPU build should not.
+    """
+    roots: list[str] = []
+    try:
+        spec = importlib.util.find_spec("llama_cpp")
+        if spec and spec.submodule_search_locations:
+            roots.extend(spec.submodule_search_locations)
+    except Exception:  # noqa: BLE001 - find_spec can raise on odd setups
+        pass
+    # Belt and suspenders for a frozen (PyInstaller) build.
+    bundle = getattr(sys, "_MEIPASS", None)
+    if bundle:
+        roots.append(os.path.join(bundle, "llama_cpp"))
+    return any((Path(root) / "lib" / "ggml-cuda.dll").exists() for root in roots)
 
 
 # Sentinel pushed onto the queue to mark end-of-stream.
