@@ -32,8 +32,19 @@ class Settings:
     # data/models/). Empty == "ask the user to pick / download one".
     default_model: str = ""
 
-    # Optional system prompt prepended to every conversation.
-    system_prompt: str = "You are Mocca, a helpful local AI assistant."
+    # Optional system prompt prepended to every conversation. Written to feel
+    # warm and conversational rather than a cold task-bot: it tells the model to
+    # engage with what the user shares (not just wait for questions) and to keep
+    # a friendly, natural tone. Kept short - it's prepended to every turn, so it
+    # also costs prompt-processing time on CPU.
+    system_prompt: str = (
+        "You are Mocca, a friendly local AI assistant with a warm, "
+        "conversational style. Talk like a thoughtful person, not a search box. "
+        "Engage with what the user says: if they share something about "
+        "themselves, respond with genuine interest and remember it, rather than "
+        "waiting for a question. Keep replies clear and concise, and never sound "
+        "cold or robotic."
+    )
 
     # --- Sampling controls passed to the engine per request ----------------
     temperature: float = 0.7

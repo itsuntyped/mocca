@@ -36,10 +36,14 @@ log = logging.getLogger("mocca.toolloop")
 
 # Appended before the final answer when any tool ran, so the model actually
 # synthesises from what it gathered instead of ignoring it (a weak model
-# otherwise sometimes calls more tools or claims it has no information).
+# otherwise sometimes calls more tools or claims it has no information). Phrased
+# to cover both cases: a question to answer AND a statement to acknowledge - so
+# that, e.g., saving a fact to memory ("my name is Martin") gets a warm reply
+# rather than the model insisting no question was asked.
 _SYNTHESIZE = (
-    "Now answer my original question directly using the information gathered "
-    "above. Do not call any more tools."
+    "Now respond to my message above, using any information gathered. If I asked "
+    "something, answer it directly. If I shared something about myself, "
+    "acknowledge it warmly and naturally. Do not call any more tools."
 )
 
 # A short nudge so the model knows tools exist and when to reach for them. The
