@@ -347,6 +347,8 @@ code {
 }
 .catalog-item .get-btn:hover { background: var(--grey-650); }
 .catalog-item.installed .get-btn { opacity: 0.5; cursor: default; }
+/* While a download runs, all download buttons are disabled (one at a time). */
+.catalog-item .get-btn:disabled { opacity: 0.5; cursor: default; background: var(--grey-700); }
 
 .manual-pull { display: flex; flex-direction: column; gap: 8px; }
 .manual-pull .pull-row { display: flex; gap: 8px; }
@@ -355,7 +357,16 @@ code {
 .pull-progress { display: flex; flex-direction: column; gap: 6px; }
 .bar { height: 8px; background: var(--grey-800); border-radius: 4px; overflow: hidden; border: 1px solid var(--border); }
 .bar-fill { height: 100%; width: 0; background: linear-gradient(90deg, #5a5a62, #9a9aa2); transition: width 0.2s; }
+.pull-progress-row { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
 .pull-status { font-size: 13px; color: var(--text-dim); }
+/* Shared "Cancel" control next to the progress status. */
+.pull-cancel { flex: none; padding: 4px 12px; font-size: 13px; color: var(--danger); }
+/* A catalog Download button turns into "Cancel" for the model being fetched. */
+.catalog-item .get-btn.cancel {
+  background: transparent; border-color: var(--danger); color: var(--danger);
+  opacity: 1; cursor: pointer;
+}
+.catalog-item .get-btn.cancel:hover { background: var(--grey-800); }
 
 .installed-models { list-style: none; margin: 0; padding: 0; max-height: 200px; overflow-y: auto; }
 .installed-models li {

@@ -13,12 +13,15 @@ export async function api(path, options = {}) {
 }
 
 // Read an SSE stream from a POST endpoint, calling onEvent for each parsed JSON
-// payload. The browser's EventSource is GET-only, so we parse it ourselves.
-export async function streamSSE(path, body, onEvent) {
+// payload. The browser's EventSource is GET-only, so we parse it ourselves. Pass
+// an AbortSignal to allow cancelling the stream (e.g. cancelling a download);
+// when aborted, fetch/read rejects with an AbortError the caller can handle.
+export async function streamSSE(path, body, onEvent, signal) {
   const resp = await fetch(path, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(body),
+    signal,
   });
   const reader = resp.body.getReader();
   const decoder = new TextDecoder();

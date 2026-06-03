@@ -221,7 +221,10 @@
       <!-- Shared download progress (visible across tabs while downloading) -->
       <div id="pull-progress" class="pull-progress hidden">
         <div class="bar"><div id="pull-bar-fill" class="bar-fill"></div></div>
-        <span id="pull-status" class="pull-status"></span>
+        <div class="pull-progress-row">
+          <span id="pull-status" class="pull-status"></span>
+          <button type="button" id="pull-cancel" class="ghost-btn pull-cancel hidden">Cancel</button>
+        </div>
       </div>
 
       <div class="modal-actions">

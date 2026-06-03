@@ -111,10 +111,16 @@ async def download_model(
                         fh.write(chunk)
                         done += len(chunk)
                         yield {"status": f"Downloading {name}", "completed": done, "total": total}
+        part.replace(dest)
+        log.info("Downloaded %s (%d bytes)", name, dest.stat().st_size)
+        yield {"status": "Done", "completed": dest.stat().st_size, "total": dest.stat().st_size, "done": True}
     except httpx.HTTPError as exc:
-        part.unlink(missing_ok=True)
         raise ModelError(f"Download failed: {exc}") from exc
-
-    part.replace(dest)
-    log.info("Downloaded %s (%d bytes)", name, dest.stat().st_size)
-    yield {"status": "Done", "completed": dest.stat().st_size, "total": dest.stat().st_size, "done": True}
+    finally:
+        # Remove the partial file if it's still around. This covers a failed
+        # download AND a user cancellation: when the client disconnects, the
+        # streaming generator is closed (GeneratorExit/CancelledError at a yield)
+        # and this finally runs, so a cancelled download never leaves a stray
+        # ``.part``. On success ``part`` was already renamed to ``dest``, so this
+        # is a harmless no-op.
+        part.unlink(missing_ok=True)

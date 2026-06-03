@@ -92,7 +92,19 @@ function renderCatalog() {
       <span class="size">~${m.size_gb} GB</span>
       <button class="get-btn">${isInstalled ? "Installed" : "Download"}</button>`;
     const btn = item.querySelector(".get-btn");
-    if (!isInstalled) btn.onclick = () => downloadModel(m.repo, m.filename);
+    if (isInstalled) {
+      // Already have it: leave the inert "Installed" button as rendered.
+    } else if (isDownloading && m.filename === downloadingFilename) {
+      // This is the model currently downloading: turn its button into Cancel.
+      btn.textContent = "Cancel";
+      btn.classList.add("cancel");
+      btn.onclick = cancelDownload;
+    } else if (isDownloading) {
+      // A different model is downloading: only one at a time, so disable.
+      btn.disabled = true;
+    } else {
+      btn.onclick = () => downloadModel(m.repo, m.filename);
+    }
     box.appendChild(item);
   }
 }
@@ -116,15 +128,39 @@ function renderInstalledModels() {
   }
 }
 
+// One download at a time. Without this guard, clicking Download again (or a
+// different catalog entry) while a download is running starts a second SSE
+// stream, and both write to the same shared progress bar - so the bar appears
+// to "fight itself". We track the in-flight download so the catalog can render
+// the right button states (Cancel for the active model, disabled for the rest).
+let isDownloading = false;
+let downloadingFilename = null;   // filename of the model currently downloading.
+let downloadAbort = null;         // AbortController for the active download.
+
+// Abort the in-flight download. The fetch aborts, the server sees the
+// disconnect and discards its partial ``.part`` file (see models.download_model),
+// and downloadModel's catch treats the AbortError as a clean cancel.
+export function cancelDownload() {
+  if (downloadAbort) downloadAbort.abort();
+}
+
 // Download a model from Hugging Face, streaming progress into the bar.
 async function downloadModel(repo, filename) {
+  if (isDownloading) return;  // Ignore extra clicks while one download runs.
+  isDownloading = true;
+  downloadingFilename = filename;
+  downloadAbort = new AbortController();
+  el("pull-btn").disabled = true;     // Manual-tab trigger; catalog handled by renderCatalog.
+  renderCatalog();                    // Reflect state: active -> Cancel, others -> disabled.
+
   const progress = el("pull-progress");
   const fill = el("pull-bar-fill");
   const status = el("pull-status");
+  const cancelBtn = el("pull-cancel");
   progress.classList.remove("hidden");
+  cancelBtn.classList.remove("hidden");
   fill.style.width = "0%";
   status.textContent = "Starting…";
-  el("pull-btn").disabled = true;
 
   try {
     await streamSSE("/api/models/download", { repo, filename }, (evt) => {
@@ -139,11 +175,23 @@ async function downloadModel(repo, filename) {
         status.textContent = "Done";
         fill.style.width = "100%";
       }
-    });
+    }, downloadAbort.signal);
   } catch (err) {
-    status.textContent = "Error: " + err.message;
+    // An aborted fetch is a user cancel, not an error.
+    if (err.name === "AbortError") {
+      status.textContent = "Cancelled";
+      fill.style.width = "0%";
+    } else {
+      status.textContent = "Error: " + err.message;
+    }
   } finally {
+    isDownloading = false;
+    downloadingFilename = null;
+    downloadAbort = null;
     el("pull-btn").disabled = false;
+    cancelBtn.classList.add("hidden");
+    // loadModels() re-renders the catalog (recreating its buttons), so a
+    // completed entry flips to "Installed" and the rest come back enabled.
     await loadModels();
     checkHealth();
   }
