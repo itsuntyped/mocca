@@ -98,6 +98,28 @@ def categories() -> list[str]:
     return sorted({t.category for t in _TOOLS.values()})
 
 
+def network_categories() -> list[str]:
+    """Categories containing at least one tool that reaches the internet.
+
+    These are the only categories gated behind a user setting (web search);
+    everything else is local and always available.
+    """
+    return sorted({t.category for t in _TOOLS.values() if not t.is_local})
+
+
+def active_categories(enable_web_search: bool) -> list[str]:
+    """The categories the AI may use, given the user's web-search preference.
+
+    Every local category is always on (all local tools are enabled by default);
+    the network categories are included only when the user has web search on.
+    """
+    network = set(network_categories())
+    active = [c for c in categories() if c not in network]
+    if enable_web_search:
+        active.extend(sorted(network))
+    return active
+
+
 def get(name: str) -> Tool | None:
     """Look up a tool by name, or None if it doesn't exist."""
     return _TOOLS.get(name)

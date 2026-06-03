@@ -11,13 +11,8 @@ from __future__ import annotations
 
 import json
 import logging
-from dataclasses import asdict, dataclass, field, fields
+from dataclasses import asdict, dataclass, fields
 from typing import Any
-
-# Tool categories enabled by default. Local-only categories are on; the "web"
-# category is intentionally omitted so Mocca stays local unless the user opts in
-# (see CLAUDE.md goal #2). These must match the categories the tools declare.
-_DEFAULT_TOOL_CATEGORIES = ["math", "time", "files"]
 
 from .paths import CONFIG_FILE, ensure_dirs
 
@@ -59,16 +54,11 @@ class Settings:
     log_level: str = "INFO"
 
     # --- Tools -------------------------------------------------------------
-    # Which tool categories the AI may use. The "web" category (network access)
-    # is off by default; the user enables it explicitly in Settings.
-    enabled_tool_categories: list[str] = field(
-        default_factory=lambda: list(_DEFAULT_TOOL_CATEGORIES)
-    )
-
-    # Whether the chat UI shows the assistant's tool calls (the collapsible
-    # "Used tool" blocks). Off by default to keep the conversation clean; tool
-    # calls are still executed and stored either way, just hidden until enabled.
-    show_tool_calls: bool = False
+    # All local tools are always available to the AI. The only user-facing
+    # switch is web search (the one network capability): on by default, but the
+    # user can turn it off to keep Mocca fully offline. When off, the network
+    # tool category is withheld from the model (see registry.active_categories).
+    enable_web_search: bool = True
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)

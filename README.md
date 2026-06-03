@@ -1,7 +1,11 @@
 # Mocca
 
 A simple, standalone local AI chat app. Download any GGUF model and chat with
-it - everything runs on your machine. No accounts, no cloud, no telemetry.
+it - everything runs on your machine. No accounts, no cloud, no telemetry. The
+assistant can also search the web when you ask it something current (a single
+toggle turns this off to stay fully offline).
+
+![Mocca - the chat UI with the monochrome dark theme](https://i.imgur.com/fSRgBVR.png)
 
 ## Quick start
 
@@ -28,14 +32,16 @@ chatting.
 ## Tools
 
 The assistant can use **tools** - a calculator, the current date/time, unit
-conversion, and reading text files you drop in `data/files/`. Capable models
-will call them automatically and you'll see each call inline in the chat. Manage
-which tools are available under **Settings -> Tools** (grouped by category).
+conversion, reading text files you drop in `data/files/`, and **web search**
+(plus fetching a URL). Capable models call them automatically; the calls run
+behind the scenes and are not shown in the chat.
 
-Network tools (web search and fetching a URL) are included but **off by
-default**, since Mocca is local-first; enable the **web** category in Settings if
-you want them. Tool use works best with larger, tool-capable models; smaller
-models still run, just less reliably.
+All the local tools are always available. **Web search** is the one capability
+that reaches the internet: it is **on by default** so the assistant can answer
+questions about current information, but a single **Enable web search** toggle
+under **Settings -> Capability** turns it off to keep Mocca fully offline. Tool use
+works best with larger, tool-capable models; smaller models still run, just less
+reliably.
 
 ## GPU acceleration (NVIDIA)
 

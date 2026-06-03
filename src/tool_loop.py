@@ -69,9 +69,10 @@ def _build_awareness(enabled_categories: list[str]) -> str:
     """Compose the tool-awareness system text for this turn.
 
     Always covers when to use tools and the no-fabrication rule. If some tools
-    exist but their category is disabled, it also names them so the model can
-    point the user to Settings instead of refusing flatly or making something up
-    (the misleading-refusal problem when, e.g., web access is turned off).
+    exist but their category is disabled (only web search can be turned off), it
+    also names them so the model can point the user to Settings instead of
+    refusing flatly or making something up (the misleading-refusal problem when
+    web access is turned off).
     """
     parts = [_USE_TOOLS, _NO_FABRICATION]
 
@@ -87,7 +88,7 @@ def _build_awareness(enabled_categories: list[str]) -> str:
         parts.append(
             "Some capabilities exist but are currently turned off: " + listed + ". "
             "If the user asks for one of these, do not attempt it or invent a result - "
-            "tell them to enable that category in Settings -> Tools."
+            "tell them to enable web search in Settings."
         )
     return "\n\n".join(parts)
 
@@ -151,7 +152,9 @@ async def run(
     # a clearly-scoped request (e.g. a bare calculation) is a big speed-up;
     # ambiguous requests fall back to all enabled categories (see registry).
     user_text = next((m["content"] for m in reversed(messages) if m.get("role") == "user"), "")
-    categories = registry.relevant_categories(user_text, settings.enabled_tool_categories)
+    # All local tools are always available; web search is the one toggle.
+    active = registry.active_categories(settings.enable_web_search)
+    categories = registry.relevant_categories(user_text, active)
     schemas = registry.schemas(categories)
 
     # No tools to offer (none enabled, or engine missing) -> plain streamed turn.
@@ -162,7 +165,7 @@ async def run(
 
     # Decision context: the full history plus the tool-awareness text. Never
     # persisted as-is; the route saves the user message and final answer.
-    awareness = _build_awareness(settings.enabled_tool_categories)
+    awareness = _build_awareness(active)
     decision_convo = _with_tool_awareness(messages, awareness)
     # This turn's tool call/result messages, kept apart so we can build a focused
     # final-answer context from them (see below).

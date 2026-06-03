@@ -20,7 +20,6 @@ from . import database, engine
 from .llmfit_service import service as llmfit
 from .paths import STATIC_DIR, TEMPLATES_DIR
 from .routes import chat, folders, models, sessions, system
-from .routes import tools as tools_routes
 from .tools import registry as tools
 from .version import __version__
 
@@ -62,4 +61,3 @@ app.include_router(models.router)
 app.include_router(folders.router)
 app.include_router(sessions.router)
 app.include_router(chat.router)
-app.include_router(tools_routes.router)
