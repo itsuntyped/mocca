@@ -53,11 +53,12 @@ _SYNTHESIZE = (
 # saved system prompt.
 _USE_TOOLS = (
     "You have tools available. Use a tool only when it directly helps answer the "
-    "user's current request. If the user gives a web URL, use fetch_url to read "
-    "that page; use web_search only to find information when you do not have a "
-    "URL. Call at most one tool at a time, and as soon as you have the "
-    "information you need, answer the user directly - do not call additional, "
-    "repeated, or unrelated tools."
+    "user's current request. If the user gives a YouTube link, use "
+    "youtube_transcript to read the video's transcript. For any other web URL, "
+    "use fetch_url to read that page; use web_search only to find information "
+    "when you do not have a URL. Call at most one tool at a time, and as soon as "
+    "you have the information you need, answer the user directly - do not call "
+    "additional, repeated, or unrelated tools."
 )
 
 # Guards against the model fabricating tool use - claiming it searched or visited

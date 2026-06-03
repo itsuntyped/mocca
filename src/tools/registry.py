@@ -33,9 +33,13 @@ log = logging.getLogger("mocca.tools")
 # obvious cases. (This is the lightweight first cut of tool retrieval.)
 _ARITHMETIC = re.compile(r"\d\s*[-+*/x^%]\s*\d")  # e.g. "8*7", "12 + 3"
 _URL = re.compile(r"https?://|www\.", re.IGNORECASE)
+# A YouTube video link (watch?v=, youtu.be/, shorts/embed/live). Routed to the
+# youtube category (not web), so a link gets the transcript tool rather than
+# fetch_url pulling the page's HTML.
+_YOUTUBE = re.compile(r"youtube\.com/(?:watch|shorts|embed|live)|youtu\.be/", re.IGNORECASE)
 _CATEGORY_HINTS: dict[str, list[str]] = {
     "math": ["calculate", "calculator", "compute", "convert", "conversion",
-             "plus", "minus", "times", "multiply", "divide", "sum", "percent",
+             "plus", "minus", "times", "multiply", "divide", "percent",
              "percentage", "equation", "math", "arithmetic"],
     "time": ["time", "date", "today", "now", "day", "year", "month", "clock",
              "timezone", "tomorrow", "yesterday", "hour"],
@@ -53,6 +57,9 @@ _CATEGORY_HINTS: dict[str, list[str]] = {
                "remember", "don't forget", "do not forget", "keep in mind",
                "note that", "for future", "from now on", "always", "my email",
                "my birthday", "i use", "my job"],
+    # YouTube transcripts. The link itself is the strong signal (see _YOUTUBE);
+    # these keywords catch phrasings around it.
+    "youtube": ["youtube", "youtu.be", "transcript", "captions", "subtitles"],
 }
 
 # Modules in this package that are infrastructure, not tools.
@@ -167,7 +174,12 @@ def relevant_categories(text: str, enabled_categories: list[str]) -> list[str]:
     # Structural signals catch what keywords miss (a bare expression, a URL).
     if "math" in enabled and _ARITHMETIC.search(text):
         selected.add("math")
-    if "web" in enabled and _URL.search(text):
+    is_youtube = bool(_YOUTUBE.search(text))
+    if "youtube" in enabled and is_youtube:
+        selected.add("youtube")
+    # A URL routes to web (fetch_url) - unless it's a YouTube link, which the
+    # youtube transcript tool handles, so we don't also pull the page's HTML.
+    if "web" in enabled and _URL.search(text) and not is_youtube:
         selected.add("web")
 
     return sorted(selected)

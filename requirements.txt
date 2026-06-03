@@ -8,6 +8,11 @@ jinja2>=3.1             # HTML templating for the single served page
 python-multipart>=0.0.9 # Form parsing
 pydantic>=2.6           # Request/response models
 
+# Reads YouTube video transcripts for the youtube_transcript tool (a network
+# tool, gated behind the web-search toggle). Pure Python, no API key. Imported
+# lazily so a missing install never breaks startup.
+youtube-transcript-api>=1.0
+
 # Local inference engine - runs GGUF models in-process (no external server).
 # Mocca imports this lazily, so the UI and model downloads still work even if it
 # fails to install; but you need it to actually chat.
