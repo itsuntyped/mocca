@@ -430,6 +430,21 @@ class _Worker:
         finally:
             emit(_DONE)
 
+    def complete(self, model_name: str, messages: list[dict[str, Any]],
+                 options: dict[str, Any]) -> str:
+        """One non-streaming completion, returning the full reply text.
+
+        Used for background work like memory extraction, where we want the whole
+        result at once rather than a token stream. Holds the per-model lock like
+        the other paths, so it serialises with chat generation.
+        """
+        with self._lock:
+            self._load_if_needed(model_name)
+            if not _native_tools_supported(self._llm):
+                messages = _flatten_tool_messages(messages)
+            resp = self._llm.create_chat_completion(messages=messages, stream=False, **options)
+            return resp["choices"][0]["message"].get("content") or ""
+
     def decide(self, model_name: str, messages: list[dict[str, Any]],
                tool_schemas: list[dict[str, Any]],
                options: dict[str, Any]) -> Decision:
@@ -540,6 +555,20 @@ async def decide(
     return await asyncio.to_thread(
         _worker.decide, model_name, messages, tool_schemas, opts
     )
+
+
+async def complete(
+    model_name: str,
+    messages: list[dict[str, Any]],
+    *,
+    options: dict[str, Any] | None = None,
+) -> str:
+    """Async wrapper around one non-streaming completion (runs off the loop).
+
+    Returns the full reply text. Used by background memory extraction.
+    """
+    opts = _sampling_options(options)
+    return await asyncio.to_thread(_worker.complete, model_name, messages, opts)
 
 
 def _sampling_options(options: dict[str, Any] | None) -> dict[str, Any]:

@@ -26,6 +26,7 @@ databases gain the folder_id/favorite columns without losing any data.
 from __future__ import annotations
 
 import logging
+import re
 import sqlite3
 import uuid
 from datetime import datetime, timezone
@@ -96,6 +97,7 @@ def init_db() -> None:
             CREATE TABLE IF NOT EXISTS memories (
                 id          TEXT PRIMARY KEY,
                 content     TEXT NOT NULL,
+                category    TEXT NOT NULL DEFAULT 'fact',
                 created_at  TEXT NOT NULL
             );
             """
@@ -118,6 +120,12 @@ def _migrate(conn: sqlite3.Connection) -> None:
     if "favorite" not in cols:
         conn.execute("ALTER TABLE sessions ADD COLUMN favorite INTEGER NOT NULL DEFAULT 0")
         log.info("Migrated sessions: added favorite column")
+
+    # Memories gained a category (identity/preference/fact/...) after first ship.
+    mem_cols = {row[1] for row in conn.execute("PRAGMA table_info(memories)")}
+    if mem_cols and "category" not in mem_cols:
+        conn.execute("ALTER TABLE memories ADD COLUMN category TEXT NOT NULL DEFAULT 'fact'")
+        log.info("Migrated memories: added category column")
 
 
 # --------------------------------------------------------------------------- #
@@ -302,30 +310,57 @@ def get_messages(session_id: str) -> list[dict[str, Any]]:
 # Memories (long-term, cross-chat facts about the user)
 # --------------------------------------------------------------------------- #
 
-def add_memory(content: str) -> dict[str, Any] | None:
+def _tokens(text: str) -> set[str]:
+    """Lowercase alphanumeric word tokens (punctuation stripped).
+
+    Splitting on whitespace alone left punctuation attached ("python." !=
+    "python"), which broke near-duplicate detection; this normalises both.
+    """
+    return set(re.findall(r"[a-z0-9]+", text.lower()))
+
+
+def _jaccard(a: str, b: str) -> float:
+    """Word-overlap similarity (0..1) of two strings.
+
+    Cheap, dependency-free near-duplicate detection so rephrasings like "User
+    likes Python" and "The user likes Python." don't both get stored.
+    """
+    ta, tb = _tokens(a), _tokens(b)
+    if not ta or not tb:
+        return 0.0
+    return len(ta & tb) / len(ta | tb)
+
+
+# Above this word-overlap, a new memory is treated as a duplicate of an existing
+# one and skipped. 0.6 catches rephrasings without merging genuinely distinct
+# facts (e.g. "likes Python" vs "uses Python at work" share few words).
+_DEDUP_THRESHOLD = 0.6
+
+
+def add_memory(content: str, category: str = "fact") -> dict[str, Any] | None:
     """Store one durable fact about the user, returning it (or None if blank).
 
-    Memories are deduplicated case-insensitively so a model that re-saves the
-    same fact across turns doesn't pile up identical rows. When the content
-    already exists, the existing row is returned unchanged.
+    Deduplicated two ways so re-saving the same fact (across turns, or rephrased)
+    doesn't pile up rows: an exact case-insensitive match, and a fuzzy
+    word-overlap check (:func:`_jaccard` >= ``_DEDUP_THRESHOLD``). When a
+    duplicate is found, the existing row is returned unchanged.
     """
     text = (content or "").strip()
     if not text:
         return None
     with _connect() as conn:
-        existing = conn.execute(
-            "SELECT * FROM memories WHERE content = ? COLLATE NOCASE", (text,)
-        ).fetchone()
-        if existing is not None:
-            return dict(existing)
+        rows = conn.execute("SELECT * FROM memories").fetchall()
+        for row in rows:
+            if row["content"].lower() == text.lower() or _jaccard(row["content"], text) >= _DEDUP_THRESHOLD:
+                return dict(row)
         mid = _new_id()
         ts = _now()
         conn.execute(
-            "INSERT INTO memories (id, content, created_at) VALUES (?, ?, ?)",
-            (mid, text, ts),
+            "INSERT INTO memories (id, content, category, created_at) VALUES (?, ?, ?, ?)",
+            (mid, text, category, ts),
         )
-    log.debug("Stored memory %s", mid)
-    return {"id": mid, "content": text, "created_at": ts}
+    log.debug("Stored memory %s (category=%s)", mid, category)
+    return {"id": mid, "content": text, "category": category, "created_at": ts}
 
 
 def list_memories() -> list[dict[str, Any]]:

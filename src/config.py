@@ -72,12 +72,12 @@ class Settings:
     enable_web_search: bool = True
 
     # --- Memory ------------------------------------------------------------
-    # Long-term memory: when on (default), the AI can save short, important
-    # facts about the user via the ``remember`` tool, and those facts are
-    # injected into every chat so it remembers them across conversations. Turn
-    # it off to stop both saving and recalling - nothing is injected and the
-    # remember tool is withheld. Stored memories are kept (and still
-    # manageable in Settings); they're just not used while this is off.
+    # Long-term memory: when on (default), a background pass extracts short,
+    # important facts about the user from each chat (see memory_extractor) and
+    # those facts are injected into every conversation so the AI remembers them.
+    # Turn it off to stop both saving and recalling - nothing is extracted and
+    # nothing is injected. Stored memories are kept (and still manageable in
+    # Settings); they're just not used while this is off.
     enable_memory: bool = True
 
     def to_dict(self) -> dict[str, Any]:

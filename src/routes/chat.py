@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 from typing import AsyncIterator
@@ -10,11 +11,15 @@ from fastapi import APIRouter, HTTPException
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
-from .. import config, database, engine, tool_loop
+from .. import config, database, engine, memory_extractor, tool_loop
 from ..sse import sse
 
 log = logging.getLogger("mocca.chat")
 router = APIRouter()
+
+# Holds references to in-flight background memory-extraction tasks so the event
+# loop doesn't garbage-collect them mid-run; each removes itself when done.
+_bg_tasks: set[asyncio.Task] = set()
 
 # Message roles that form the conversation the engine sees. Tool rows are stored
 # for display only and are rebuilt fresh each turn by the tool loop, so they're
@@ -134,6 +139,17 @@ async def chat(req: ChatRequest) -> StreamingResponse:
             reply = "".join(collected)
             if reply:
                 database.add_message(req.session_id, "assistant", reply)
+                # Capture durable facts in the background (after the reply, while
+                # the model is idle) - never blocks the response. Gated on the
+                # memory toggle and a quick "is this about the user?" check so
+                # ordinary Q&A turns don't trigger an extra LLM call.
+                if settings.enable_memory and memory_extractor.looks_personal(req.message):
+                    convo = database.get_messages(req.session_id)
+                    task = asyncio.create_task(
+                        memory_extractor.extract_and_store(req.model, convo)
+                    )
+                    _bg_tasks.add(task)
+                    task.add_done_callback(_bg_tasks.discard)
         yield sse({"done": True})
 
     return StreamingResponse(event_stream(), media_type="text/event-stream")

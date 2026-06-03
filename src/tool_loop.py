@@ -69,7 +69,6 @@ _NO_FABRICATION = (
     "something, say so plainly instead of inventing an answer."
 )
 
-
 def _build_awareness(enabled_categories: list[str]) -> str:
     """Compose the tool-awareness system text for this turn.
 
@@ -98,20 +97,22 @@ def _build_awareness(enabled_categories: list[str]) -> str:
     return "\n\n".join(parts)
 
 
-def _with_tool_awareness(
+def _decision_context(
     messages: list[dict[str, Any]], awareness: str
 ) -> list[dict[str, Any]]:
-    """Return a copy of ``messages`` with the awareness text folded in.
+    """Build the system context for the tool-decision step.
 
-    Merges into a leading system message when there is one (many chat templates
-    expect a single system message), otherwise inserts one at the front.
+    The decision is a tool-selection classification, so we lead with the tool
+    instructions (``awareness``) and deliberately DROP the chat persona. The
+    warm, "talk like a thoughtful person, not a search box" persona biases the
+    model toward a conversational reply instead of making the tool call - e.g.
+    greeting "Nice to meet you, Martin" instead of calling ``remember``. The
+    persona/memory recall return for the streamed answer (see ``final_convo``).
+    Prior turns are kept (minus their system message) so the model still has
+    conversational context for its choice.
     """
-    msgs = [dict(m) for m in messages]
-    if msgs and msgs[0].get("role") == "system":
-        msgs[0]["content"] = f"{(msgs[0].get('content') or '').rstrip()}\n\n{awareness}"
-    else:
-        msgs.insert(0, {"role": "system", "content": awareness})
-    return msgs
+    history = [dict(m) for m in messages if m.get("role") != "system"]
+    return [{"role": "system", "content": awareness}, *history]
 
 
 def _call_signature(call: engine.ToolCall) -> str:
@@ -157,13 +158,10 @@ async def run(
     # a clearly-scoped request (e.g. a bare calculation) is a big speed-up;
     # ambiguous requests fall back to all enabled categories (see registry).
     user_text = next((m["content"] for m in reversed(messages) if m.get("role") == "user"), "")
-    # All local tools are always available; web search is the one toggle.
+    # All local tools are always available; web search is the one toggle. (Memory
+    # is no longer a tool - durable facts are captured by background extraction
+    # in memory_extractor; see the chat route.)
     active = registry.active_categories(settings.enable_web_search)
-    # Memory has its own switch: when it's off, withhold the remember tool so the
-    # AI neither saves nor is offered to save anything (recall is gated too, in
-    # the chat route that injects stored memories into the system prompt).
-    if not settings.enable_memory:
-        active = [c for c in active if c != "memory"]
     categories = registry.relevant_categories(user_text, active)
     schemas = registry.schemas(categories)
 
@@ -173,10 +171,10 @@ async def run(
             yield {"chunk": chunk}
         return
 
-    # Decision context: the full history plus the tool-awareness text. Never
-    # persisted as-is; the route saves the user message and final answer.
+    # Decision context: tool instructions + history, persona dropped (see
+    # _decision_context). Never persisted; the route saves the answer.
     awareness = _build_awareness(active)
-    decision_convo = _with_tool_awareness(messages, awareness)
+    decision_convo = _decision_context(messages, awareness)
     # This turn's tool call/result messages, kept apart so we can build a focused
     # final-answer context from them (see below).
     tool_msgs: list[dict[str, Any]] = []
