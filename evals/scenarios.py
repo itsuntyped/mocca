@@ -128,6 +128,14 @@ SCENARIOS: list[Scenario] = [
         messages=["hey there, how's your day going?"],
         checks=[no_tools()],
     ),
+    Scenario(
+        name="weather-routing",
+        area="tools",
+        messages=["what's the weather like in Tokyo right now?"],
+        # Asserts routing only: the tool_call (with the location) is emitted before
+        # the network lookup, so this passes even if the live fetch fails.
+        checks=[called_tool("get_weather"), tool_arg_contains("get_weather", "Tokyo")],
+    ),
     # --- Tools + answer: shipping (offline, deterministic resolution) ---------
     Scenario(
         name="shipping-landing-page",

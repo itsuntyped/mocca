@@ -18,7 +18,7 @@ from src.tools.base import ToolError
 # The tools we ship; discovery must find all of them.
 _EXPECTED = {
     "calculator", "convert_units", "current_datetime", "list_files", "read_file",
-    "web_search", "fetch_url", "youtube_transcript", "track_shipment",
+    "web_search", "fetch_url", "youtube_transcript", "track_shipment", "get_weather",
 }
 
 
@@ -32,7 +32,7 @@ class TestRegistry(unittest.TestCase):
         self.assertTrue(_EXPECTED.issubset(names), f"missing: {_EXPECTED - names}")
 
     def test_network_categories(self):
-        self.assertEqual(set(registry.network_categories()), {"web", "youtube", "shipping"})
+        self.assertEqual(set(registry.network_categories()), {"web", "youtube", "shipping", "weather"})
 
     def test_active_excludes_network_when_off(self):
         active = set(registry.active_categories(enable_web_search=False))
@@ -73,6 +73,9 @@ class TestRegistry(unittest.TestCase):
 
     def test_relevance_files_keyword(self):
         self.assertIn("files", self._relevant("please read my notes file"))
+
+    def test_relevance_weather_keyword(self):
+        self.assertIn("weather", self._relevant("what's the weather in Paris"))
 
     def test_relevance_search_keyword(self):
         self.assertIn("web", self._relevant("search for the latest news"))

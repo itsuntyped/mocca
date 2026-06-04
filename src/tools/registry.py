@@ -64,6 +64,10 @@ _CATEGORY_HINTS: dict[str, list[str]] = {
     # YouTube transcripts. The link itself is the strong signal (see _YOUTUBE);
     # these keywords catch phrasings around it.
     "youtube": ["youtube", "youtu.be", "transcript", "captions", "subtitles"],
+    # Weather lookups. Network-gated like the other outbound tools.
+    "weather": ["weather", "forecast", "temperature", "rain", "raining",
+                "snow", "snowing", "sunny", "cloudy", "humidity", "windy",
+                "climate", "how hot", "how cold", "degrees outside"],
     # Shipment tracking. Keyword-driven only - tracking-number formats vary too
     # widely to match structurally without false positives, and the tool validates
     # the number itself once it runs. Carrier names are included so "where is my

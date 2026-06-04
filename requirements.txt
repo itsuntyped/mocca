@@ -19,6 +19,11 @@ youtube-transcript-api>=1.0
 # missing install never breaks startup.
 tracking-numbers>=0.1.8
 
+# Current weather + short forecast for the get_weather tool (a network tool over
+# wttr.in, gated behind the web-search toggle). No API key. Imported lazily so a
+# missing install never breaks startup.
+python-weather>=2.0
+
 # Local inference engine - runs GGUF models in-process (no external server).
 # Mocca imports this lazily, so the UI and model downloads still work even if it
 # fails to install; but you need it to actually chat.
