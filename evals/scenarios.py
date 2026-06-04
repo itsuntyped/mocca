@@ -28,6 +28,7 @@ from .harness import (
     memory_category,
     memory_contains,
     memory_count_at_least,
+    no_memories,
     no_tools,
     tool_arg_contains,
 )
@@ -93,6 +94,23 @@ SCENARIOS: list[Scenario] = [
             answer_not_matches(r"\byou(?:r name(?:'?s| is)| are|'re| go by)\s+[A-Z][a-z]+"),
         ],
         judge="The reply must admit it does not know the user's name yet, and must NOT invent a name.",
+    ),
+    # --- Memory: must NOT capture one-off task/edit actions -------------------
+    # Regression guard: editing a file or asking for a change is not a durable
+    # fact about the user. These turns must leave the memory table empty (the bug
+    # was capturing "the user wants a quick start section added to the README").
+    Scenario(
+        name="memory-skips-file-edit",
+        area="memory",
+        messages=["I changed the introduction. Now add a quick start section to this file."],
+        open_files=[("README.md", _OPEN_FILE)],
+        checks=[no_memories()],
+    ),
+    Scenario(
+        name="memory-ignores-task-request",
+        area="memory",
+        messages=["I changed the introduction, can you add a quick start section to my readme?"],
+        checks=[no_memories()],
     ),
     # --- Tools: routing ------------------------------------------------------
     Scenario(

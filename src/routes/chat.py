@@ -249,8 +249,11 @@ async def chat(req: ChatRequest) -> StreamingResponse:
                 # Capture durable facts in the background (after the reply, while
                 # the model is idle) - never blocks the response. Gated on the
                 # memory toggle and a quick "is this about the user?" check so
-                # ordinary Q&A turns don't trigger an extra LLM call.
-                if settings.enable_memory and memory_extractor.looks_personal(req.message):
+                # ordinary Q&A turns don't trigger an extra LLM call. We also skip
+                # file-edit turns: those are about the open file ("add a section",
+                # "change the intro"), not durable facts about the user - capturing
+                # them just pollutes memory with one-off task actions.
+                if settings.enable_memory and not editing_file and memory_extractor.looks_personal(req.message):
                     convo = database.get_messages(req.session_id)
                     task = asyncio.create_task(
                         memory_extractor.extract_and_store(req.model, convo)

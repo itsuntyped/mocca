@@ -57,12 +57,18 @@ _EXTRACT_SYSTEM_PROMPT = (
     "sentence) and \"category\" (one of: identity, preference, fact, location, "
     "job, goal). Return at most 2 - the most important. If nothing durable was "
     "revealed, return []. Output ONLY the JSON, no markdown or commentary.\n\n"
-    "Example:\n"
+    "Example 1 (durable facts):\n"
     "Conversation:\n"
     "User: yo im sam, ive used rust for years\n"
     "Assistant: Nice to meet you, Sam!\n"
     "Output: [{\"text\": \"The user's name is Sam.\", \"category\": \"identity\"}, "
-    "{\"text\": \"The user has used Rust for years.\", \"category\": \"fact\"}]"
+    "{\"text\": \"The user has used Rust for years.\", \"category\": \"fact\"}]\n\n"
+    "Example 2 (a one-off task or edit request reveals nothing durable - return "
+    "[], do NOT record what they asked you to do):\n"
+    "Conversation:\n"
+    "User: I changed the introduction, can you add a quick start section to the README?\n"
+    "Assistant: Sure! Here is the updated README...\n"
+    "Output: []"
 )
 
 

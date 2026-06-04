@@ -165,6 +165,11 @@ def memory_count_at_least(n: int) -> Check:
     return Check(f">= {n} memory row(s)", lambda r: len(r.memories) >= n)
 
 
+def no_memories() -> Check:
+    """No memory row was stored (e.g. a task/edit turn must not pollute memory)."""
+    return Check("stores no memory", lambda r: not r.memories)
+
+
 # --- Scenario ---------------------------------------------------------------
 
 @dataclass
@@ -266,8 +271,9 @@ async def run_once(model: str, scenario: Scenario, *, temperature: float) -> Run
         if reply:
             database.add_message(sid, "assistant", reply)
 
-        # Extraction: same gate as production, but awaited so we can assert on it.
-        if settings.enable_memory and memory_extractor.looks_personal(user_text):
+        # Extraction: same gate as production (skip file-edit turns), but awaited
+        # so we can assert on it.
+        if settings.enable_memory and not editing_file and memory_extractor.looks_personal(user_text):
             convo = database.get_messages(sid)
             await memory_extractor.extract_and_store(model, convo)
 
