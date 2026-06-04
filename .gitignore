@@ -1,6 +1,10 @@
 # Mocca runtime data - never commit user chats, logs, or local config.
 /data/
 
+# Model-eval sandbox (scripts/eval.py): its own config, database, and a
+# dedicated multi-GB copy of the eval model - never commit any of it.
+/evals/.sandbox/
+
 # Python
 __pycache__/
 *.py[cod]

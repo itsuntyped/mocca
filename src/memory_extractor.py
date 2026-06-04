@@ -32,8 +32,10 @@ log = logging.getLogger("mocca.memory")
 
 # Any first-person reference -> the message is *about the user*, so it may carry
 # a fact worth keeping. We only bother extracting when this matches, so ordinary
-# question-answering turns don't trigger a background LLM call.
-_PERSONAL = re.compile(r"\b(i|im|my|me|mine|myself)\b", re.IGNORECASE)
+# question-answering turns don't trigger a background LLM call. Includes the
+# apostrophe-less casual contractions ("im", "ive") Mocca deliberately supports -
+# without "ive", a casual "ive worked with Rust" would skip extraction entirely.
+_PERSONAL = re.compile(r"\b(i|im|ive|my|me|mine|myself)\b", re.IGNORECASE)
 
 # Recent messages to feed the extractor: enough for context (e.g. "what's your
 # name?" then "Martin"), few enough to stay cheap.
@@ -104,10 +106,13 @@ def _parse_facts(raw: str) -> list[dict[str, str]]:
 _FALLBACK = [
     (re.compile(r"\bmy name is\s+([A-Za-z][\w' \-]{1,40})", re.I), "The user's name is {}.", "identity"),
     (re.compile(r"\bcall me\s+([A-Za-z][\w' \-]{1,40})", re.I), "The user likes to be called {}.", "identity"),
-    (re.compile(r"\bi(?:'m| am)\s+from\s+([A-Za-z][\w' \-]{1,40})", re.I), "The user is from {}.", "location"),
+    (re.compile(r"\bi(?:'?m| am)\s+from\s+([A-Za-z][\w' \-]{1,40})", re.I), "The user is from {}.", "location"),
     (re.compile(r"\bi live in\s+([A-Za-z][\w' \-]{1,40})", re.I), "The user lives in {}.", "location"),
     (re.compile(r"\bi work (?:as|at|in)\s+([A-Za-z][\w' \-]{2,50})", re.I), "The user works {}.", "job"),
-    (re.compile(r"\bi(?:'ve| have)? ?(?:used|been using|worked with)\s+([A-Za-z][\w'+#. \-]{1,40})", re.I), "The user has experience with {}.", "fact"),
+    # Accept the apostrophe-less casual forms too ("ive used", "im from"): Mocca's
+    # memory deliberately targets casual phrasing, and the LLM extractor is
+    # inconsistent on it, so the deterministic net must catch it.
+    (re.compile(r"\bi(?:'?ve| have)? ?(?:used|been using|worked with)\s+([A-Za-z][\w'+#. \-]{1,40})", re.I), "The user has experience with {}.", "fact"),
     (re.compile(r"\bi (?:really |absolutely |;)?(?:like|love|prefer|enjoy)\s+([A-Za-z][\w' \-]{2,50})", re.I), "The user likes {}.", "preference"),
 ]
 
