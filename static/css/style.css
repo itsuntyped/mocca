@@ -192,6 +192,80 @@ code {
 /* Chat */
 .chat { flex: 1; display: flex; flex-direction: column; min-width: 0; background: var(--grey-900); }
 
+/*
+ * Artifact panel (prototype): file-like assistant output opens here as an
+ * editor on the right. It's a flex sibling of the chat column, so opening it
+ * just shrinks the chat; on narrow screens it becomes a full-screen overlay.
+ */
+.artifact-panel {
+  width: 44%; min-width: 360px; max-width: 720px; flex-shrink: 0;
+  display: flex; flex-direction: column;
+  background: var(--grey-850); border-left: 1px solid var(--border);
+}
+.artifact-head {
+  display: flex; align-items: center; gap: 10px;
+  padding: 12px 14px; border-bottom: 1px solid var(--border-soft);
+}
+.artifact-title {
+  flex: 1; min-width: 0; font-family: var(--mono); font-size: 13px; font-weight: 600;
+  color: var(--text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.artifact-actions { display: flex; gap: 2px; flex-shrink: 0; }
+.artifact-actions button {
+  background: none; border: none; color: var(--text-dim); cursor: pointer;
+  padding: 6px; border-radius: 6px; display: grid; place-items: center;
+}
+.artifact-actions button:hover { color: var(--text); background: var(--grey-750); }
+.artifact-editor {
+  flex: 1; resize: none; border: none; outline: none;
+  background: var(--grey-900); color: var(--text);
+  font-family: var(--mono); font-size: 13px; line-height: 1.6;
+  padding: 16px; tab-size: 2;
+}
+
+/* Inline card that replaces a file block in the chat and opens the panel. */
+.artifact-card {
+  display: flex; align-items: center; gap: 12px; width: 100%;
+  margin: 0.4em 0; padding: 10px 12px; text-align: left; cursor: pointer;
+  background: var(--grey-800); border: 1px solid var(--border);
+  border-radius: var(--radius-sm); color: var(--text); font: inherit;
+  transition: background 0.12s, border-color 0.12s;
+}
+.artifact-card:hover { background: var(--grey-750); border-color: var(--grey-650); }
+.artifact-card-icon { flex-shrink: 0; color: var(--text-mid); display: grid; place-items: center; }
+.artifact-card-text { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.artifact-card-title {
+  font-size: 14px; font-weight: 600;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.artifact-card-sub { font-size: 12px; color: var(--text-dim); }
+.artifact-card-open { flex-shrink: 0; font-size: 12px; color: var(--text-dim); }
+
+/* "Generating <file>..." indicator shown in the chat while a file streams. */
+.artifact-generating {
+  display: inline-flex; align-items: center; gap: 10px;
+  margin: 0.4em 0; padding: 9px 13px;
+  background: var(--grey-800); border: 1px solid var(--border);
+  border-radius: var(--radius-sm); font-size: 14px;
+}
+.artifact-generating-spinner {
+  flex-shrink: 0; width: 14px; height: 14px; border-radius: 50%;
+  border: 2px solid var(--grey-650); border-top-color: var(--text-mid);
+  animation: spin 0.8s linear infinite;
+}
+@keyframes spin { to { transform: rotate(360deg); } }
+/* The label text shimmers left-to-right so it reads as actively working. */
+.artifact-generating-label {
+  color: transparent;
+  background: linear-gradient(90deg, var(--text-dim) 25%, var(--text) 50%, var(--text-dim) 75%);
+  background-size: 200% 100%;
+  -webkit-background-clip: text; background-clip: text;
+  animation: shimmer 1.6s linear infinite;
+}
+@keyframes shimmer { to { background-position: -200% 0; } }
+/* No blinking cursor while the generating indicator is up; it'd be noise. */
+.msg .bubble.streaming:has(.artifact-generating)::after { display: none; }
+
 /* Active-model selector inside the Models modal. */
 .active-model-row { display: flex; flex-direction: column; gap: 6px; }
 .model-select {
@@ -227,6 +301,54 @@ code {
   animation: blink 1s steps(2) infinite;
 }
 @keyframes blink { 50% { opacity: 0; } }
+
+/*
+ * Rendered Markdown inside assistant bubbles. The aim is structure without
+ * shouting: headings are only slightly larger than body text, spacing is tight,
+ * and everything stays within the monochrome palette. (User bubbles keep the
+ * plain pre-wrap text styling above; only .md bubbles render HTML.)
+ */
+.msg .bubble.md { white-space: normal; }
+.bubble.md > :first-child { margin-top: 0; }
+.bubble.md > :last-child { margin-bottom: 0; }
+.bubble.md p { margin: 0.5em 0; }
+.bubble.md h1, .bubble.md h2, .bubble.md h3,
+.bubble.md h4, .bubble.md h5, .bubble.md h6 {
+  margin: 0.7em 0 0.3em; line-height: 1.3; font-weight: 600;
+}
+.bubble.md h1 { font-size: 1.25em; }
+.bubble.md h2 { font-size: 1.18em; }
+.bubble.md h3 { font-size: 1.08em; }
+.bubble.md h4, .bubble.md h5, .bubble.md h6 { font-size: 1em; }
+.bubble.md ul, .bubble.md ol { margin: 0.5em 0; padding-left: 1.4em; }
+.bubble.md li { margin: 0.2em 0; }
+.bubble.md li > ul, .bubble.md li > ol { margin: 0.2em 0; }
+.bubble.md a { color: var(--text); text-decoration: underline; }
+.bubble.md img { max-width: 100%; border-radius: var(--radius-sm); }
+.bubble.md hr { border: none; border-top: 1px solid var(--border); margin: 0.9em 0; }
+.bubble.md blockquote {
+  margin: 0.5em 0; padding: 0.1em 0.9em;
+  border-left: 3px solid var(--grey-700); color: var(--text-mid);
+}
+/* Fenced code blocks: a flat panel, horizontally scrollable, no inline pill. */
+.bubble.md pre {
+  margin: 0.5em 0; padding: 10px 12px; overflow-x: auto;
+  background: var(--grey-900); border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+}
+.bubble.md pre code {
+  background: none; padding: 0; font-size: 0.85em;
+  white-space: pre; line-height: 1.5;
+}
+/* Tables: scroll horizontally on narrow screens rather than overflow the bubble. */
+.bubble.md table {
+  border-collapse: collapse; margin: 0.5em 0;
+  display: block; width: max-content; max-width: 100%; overflow-x: auto;
+}
+.bubble.md th, .bubble.md td {
+  border: 1px solid var(--border); padding: 5px 10px; text-align: left;
+}
+.bubble.md th { background: var(--grey-800); font-weight: 600; }
 
 /* A single inline checkbox + label row in a modal (e.g. "Enable web search"). */
 .modal-body label.check-row { flex-direction: row; align-items: center; gap: 10px; }
@@ -448,6 +570,12 @@ code {
   .msg .bubble { max-width: 86%; }
   .messages { padding: 18px 0; }
   .composer { padding: 12px 14px 16px; gap: 8px; }
+
+  /* The artifact panel can't sit beside the chat on a phone, so it covers it. */
+  .artifact-panel {
+    position: fixed; inset: 0; z-index: 60;
+    width: 100%; min-width: 0; max-width: none;
+  }
 
   /* Sidebar chats on touch: no hover, so the star, pencil and trash are
      always visible, with larger tap targets. The favorite star is colorized

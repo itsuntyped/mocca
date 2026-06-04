@@ -5,6 +5,8 @@ import { sendMessage } from "./chat.js";
 import { openModels, pullManual, switchTab, checkHealth, loadModels, cancelDownload, refreshCatalog } from "./models.js";
 import { loadSettings, saveSettings } from "./settings.js";
 import { openMemory, toggleMemory, clearMemories } from "./memory.js";
+import { closeArtifact, copyArtifact, downloadArtifact } from "./artifacts.js";
+import { copyIcon, downloadIcon, closeIcon } from "./icons.js";
 
 function boot() {
   // Sidebar actions.
@@ -56,6 +58,15 @@ function boot() {
   for (const tab of document.querySelectorAll(".tab")) {
     tab.onclick = () => switchTab(tab.dataset.tab);
   }
+
+  // Artifact panel: icons live in icons.js, so paint them in here, then wire
+  // the copy / download / close actions.
+  el("artifact-copy").innerHTML = copyIcon();
+  el("artifact-download").innerHTML = downloadIcon();
+  el("artifact-close").innerHTML = closeIcon();
+  el("artifact-copy").onclick = copyArtifact;
+  el("artifact-download").onclick = downloadArtifact;
+  el("artifact-close").onclick = closeArtifact;
 
   // Engine banner retry.
   el("banner-retry").onclick = checkHealth;

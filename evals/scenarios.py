@@ -32,6 +32,18 @@ from .harness import (
     tool_arg_contains,
 )
 
+# A small file fixture for the artifact scenarios. The "keepThisKey" sentinel
+# value lets a check prove the model worked from THIS content (the open file),
+# since that string appears nowhere else.
+_OPEN_FILE = (
+    "{\n"
+    '  "appName": "Mocca",\n'
+    '  "keepThisKey": "DO_NOT_REMOVE_42",\n'
+    '  "theme": "dark",\n'
+    '  "maxRequests": 10\n'
+    "}"
+)
+
 SCENARIOS: list[Scenario] = [
     # --- Memory: capture -----------------------------------------------------
     Scenario(
@@ -139,6 +151,64 @@ SCENARIOS: list[Scenario] = [
         judge=(
             "A good reply should identify the carrier and hand over an official "
             "tracking link for the user to open, without inventing a delivery status."
+        ),
+    ),
+    # --- Artifacts: editing the file open in the side panel -------------------
+    # These guard the open-file continuity feature and the two bugs we fixed:
+    # (1) an edit must preserve the user's existing content and apply the change,
+    # (2) chit-chat must NOT regenerate the file, and (3) an edit must build on
+    # the file the user has open, not on the model's own earlier copy in history.
+    # The sentinel key in _OPEN_FILE proves which version the model worked from.
+    Scenario(
+        name="open-file-edit-applies-and-preserves",
+        area="artifact",
+        messages=['Add a field "version" set to "2.0".'],
+        open_files=[("settings.json", _OPEN_FILE)],
+        checks=[
+            answer_matches(r"```"),               # returned the file as a code block
+            answer_contains("version"),           # applied the requested change
+            answer_contains("DO_NOT_REMOVE_42"),  # kept the existing content verbatim
+        ],
+        judge=(
+            "The reply should return the whole settings.json with a version field "
+            "added and every existing field (including keepThisKey) kept intact."
+        ),
+    ),
+    Scenario(
+        name="open-file-chitchat-no-regen",
+        area="artifact",
+        messages=["thank you, that's perfect"],
+        open_files=[("settings.json", _OPEN_FILE)],
+        # The bug was: with a file open, even a thank-you re-emitted the file.
+        checks=[
+            answer_not_matches(r"```"),               # no code block
+            answer_not_matches("DO_NOT_REMOVE_42"),   # didn't echo the file contents
+        ],
+        judge=(
+            "A brief, friendly acknowledgement is ideal; offering further help is "
+            "also fine. The only real failure is repeating or regenerating the file."
+        ),
+    ),
+    Scenario(
+        name="open-file-uses-current-not-history",
+        area="artifact",
+        messages=[
+            "Create a short JSON config for a small web app - just a few fields.",
+            'Now add a field "version" set to "2.0".',
+        ],
+        # Turn 1 generates some JSON into history; turn 2 opens a DIFFERENT file
+        # (with the sentinel). A correct edit builds on the open file, so the
+        # sentinel must survive - if the model copied its own turn-1 output, it
+        # would be absent. This is the "competing copy" regression guard.
+        open_files=[None, ("config.json", _OPEN_FILE)],
+        checks=[
+            answer_contains("DO_NOT_REMOVE_42"),  # edited the open file, not its own
+            answer_contains("version"),           # applied the change
+        ],
+        judge=(
+            "Good if the version field is added to the file the user has open (the "
+            "one containing keepThisKey). Restating the whole updated file is fine; "
+            "what matters is that it builds on the open file, not a different one."
         ),
     ),
 ]

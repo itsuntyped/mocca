@@ -36,9 +36,14 @@ from typing import Any, Callable
 
 from src import config, database, memory_extractor, tool_loop
 
-# Reuse the chat route's real recall block and engine-role filter so the eval
-# tests exactly what production does, with no drift.
-from src.routes.chat import _ENGINE_ROLES, _memory_block
+# Reuse the chat route's real recall block, engine-role filter, and open-file
+# handling so the eval tests exactly what production does, with no drift.
+from src.routes.chat import (
+    _ENGINE_ROLES,
+    _collapse_code_blocks,
+    _memory_block,
+    _open_file_block,
+)
 
 log = logging.getLogger("mocca.eval")
 
@@ -178,6 +183,11 @@ class Scenario:
     checks: list[Check]
     judge: str | None = None
     seed_memories: list[tuple[str, str]] = field(default_factory=list)
+    # Parallel to ``messages``: the file the user has open in the editor for that
+    # turn, as ``(title, content)`` - or None (the default for any turn without an
+    # entry). Drives the same open-file context the live route injects, so the
+    # artifact-editing behaviour can be evaluated end to end.
+    open_files: list[tuple[str, str] | None] = field(default_factory=list)
 
 
 # --- Running a scenario -----------------------------------------------------
@@ -202,7 +212,7 @@ async def run_once(model: str, scenario: Scenario, *, temperature: float) -> Run
     sid = session["id"]
     turns: list[Turn] = []
 
-    for user_text in scenario.messages:
+    for idx, user_text in enumerate(scenario.messages):
         database.add_message(sid, "user", user_text)
         database.set_session_model(sid, model)
 
@@ -212,10 +222,24 @@ async def run_once(model: str, scenario: Scenario, *, temperature: float) -> Run
             block = _memory_block(database.list_memories())
             system_text = f"{system_text}\n\n{block}" if system_text else block
 
+        # Open-file context for this turn, mirroring routes/chat.py exactly: inject
+        # the file as authoritative and strip stale full-file copies from history.
+        open_file = scenario.open_files[idx] if idx < len(scenario.open_files) else None
+        editing_file = bool(open_file and open_file[1].strip())
+        if editing_file:
+            system_text += "\n\n" + _open_file_block(open_file[0], open_file[1])
+
         messages: list[dict[str, str]] = []
         if system_text:
             messages.append({"role": "system", "content": system_text})
-        messages.extend(history)
+        if editing_file:
+            for m in history:
+                if m["role"] == "assistant":
+                    messages.append({**m, "content": _collapse_code_blocks(m["content"])})
+                else:
+                    messages.append(m)
+        else:
+            messages.extend(history)
 
         options = {
             "temperature": temperature,

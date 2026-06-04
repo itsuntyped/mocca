@@ -83,6 +83,19 @@
         <button id="send" type="submit" class="primary-btn send-btn">Send</button>
       </form>
     </main>
+
+    <!-- Artifact panel: file-like assistant output opens here as an editor. -->
+    <aside id="artifact-panel" class="artifact-panel hidden" aria-label="Artifact">
+      <div class="artifact-head">
+        <span id="artifact-title" class="artifact-title">file</span>
+        <div class="artifact-actions">
+          <button id="artifact-copy" type="button" title="Copy" aria-label="Copy"></button>
+          <button id="artifact-download" type="button" title="Download" aria-label="Download"></button>
+          <button id="artifact-close" type="button" title="Close" aria-label="Close"></button>
+        </div>
+      </div>
+      <textarea id="artifact-editor" class="artifact-editor" spellcheck="false"></textarea>
+    </aside>
   </div>
 
   <!-- Settings modal -->
