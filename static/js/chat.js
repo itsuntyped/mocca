@@ -4,16 +4,17 @@ import { state } from "./state.js";
 import { createSession, loadSidebar } from "./sidebar.js";
 import { openModels } from "./models.js";
 import { renderMarkdown } from "./markdown.js";
-import { extractArtifacts, mountArtifactCards, openArtifact, pendingArtifact, generatingIndicator, currentOpenArtifact } from "./artifacts.js";
+import { extractArtifacts, mountArtifactCards, pendingArtifact, generatingIndicator } from "./artifacts.js";
+import { openDocumentByName, flushPendingDocumentEdits, refreshDocumentsAfterReply } from "./documents.js";
 
 // Render an assistant reply: pull out file-like blocks as artifact cards, render
-// the rest as Markdown, then wire the cards. Returns the artifacts found so the
-// caller can decide whether to open the panel.
+// the rest as Markdown, then wire the cards to open their persisted document.
+// Returns the artifacts found.
 function renderAssistant(bubble, content) {
   bubble.classList.add("md");
   const { text, artifacts } = extractArtifacts(content);
   bubble.innerHTML = renderMarkdown(text);
-  mountArtifactCards(bubble);
+  mountArtifactCards(bubble, openDocumentByName);
   return artifacts;
 }
 
@@ -95,11 +96,10 @@ export async function sendMessage(text) {
   const bubble = addMessageBubble("assistant", "");
   bubble.classList.add("streaming");
 
-  // If a file is open in the panel, send its current (possibly edited) state so
-  // the model can apply follow-up changes to what the user is actually looking at.
-  const openFile = currentOpenArtifact();
+  // Flush any unsaved hand edits to attached documents first, so the model reads
+  // the user's latest text (via the read_document tool) rather than a stale copy.
+  await flushPendingDocumentEdits();
   const body = { session_id: state.currentSessionId, model, message: text };
-  if (openFile) body.open_file = openFile;
 
   let reply = "";
   try {
@@ -120,11 +120,12 @@ export async function sendMessage(text) {
   } finally {
     bubble.classList.remove("streaming");
     // Re-render once the full reply is in: only now can we reliably detect
-    // artifacts (during streaming the close fence isn't known yet). Auto-open
-    // the last artifact so it's front-and-centre, like a freshly made document.
+    // artifacts (during streaming the close fence isn't known yet) and show them
+    // as cards. The server has written any returned file back to a document, so
+    // refresh the panel's tabs and surface the edited/new file.
     if (reply) {
-      const artifacts = renderAssistant(bubble, reply);
-      if (artifacts.length) openArtifact(artifacts[artifacts.length - 1].id);
+      renderAssistant(bubble, reply);
+      await refreshDocumentsAfterReply();
     }
     state.sending = false;
     el("send").disabled = false;

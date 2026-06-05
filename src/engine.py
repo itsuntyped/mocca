@@ -26,8 +26,10 @@ import importlib.util
 import json
 import logging
 import os
+import re
 import sys
 import threading
+import time
 import uuid
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -134,6 +136,36 @@ def is_cuda_build() -> bool:
 
 # Sentinel pushed onto the queue to mark end-of-stream.
 _DONE = object()
+
+
+# Context-window auto-grow. Editing a document needs the file in the prompt (the
+# read_document result) AND the whole file generated back, so a turn can exceed a
+# small n_ctx. Rather than fail with a cryptic "Requested tokens (N) exceed
+# context window", we catch that, reload the model with a bigger context that
+# fits, and retry once. The bump is capped so we never blow up memory on a modest
+# machine, and never asked to exceed what the model was trained for.
+_CTX_OVERFLOW_RE = re.compile(r"exceed context window", re.IGNORECASE)
+_CTX_REQUESTED_RE = re.compile(r"Requested tokens \((\d+)\)", re.IGNORECASE)
+_CTX_GROW_CAP = 16384
+
+
+def _round_up_ctx(n: int) -> int:
+    """Smallest power-of-two context (>= 2048) that holds ``n`` tokens."""
+    size = 2048
+    while size < n:
+        size *= 2
+    return size
+
+
+def _friendly_generation_error(exc: Exception) -> str:
+    """Turn a raw llama.cpp failure into a message worth showing the user."""
+    if _CTX_OVERFLOW_RE.search(str(exc)):
+        return (
+            "This conversation is too large for the model's context window, even "
+            "after expanding it. Try a shorter document, start a new chat, or "
+            "raise the context size in Settings."
+        )
+    return f"Generation failed: {exc}"
 
 
 def _native_tools_supported(llm: Any) -> bool:
@@ -322,6 +354,46 @@ class _Worker:
         self._signature: tuple | None = None  # (model_name, n_ctx, n_gpu_layers, n_threads)
         # Generation isn't thread-safe; one chat at a time per loaded model.
         self._lock = threading.Lock()
+        # A raised floor on n_ctx once a turn has overflowed, so we don't shrink
+        # back and thrash (reload up, reload down) across a document-editing chat.
+        # Reset whenever the model is unloaded (see _teardown), so an idle unload
+        # naturally returns to the user's base context size.
+        self._ctx_floor = 0
+        # Monotonic time of the last model use, for the idle-unload watcher.
+        self._last_used = 0.0
+
+    def _touch(self) -> None:
+        """Mark the model as just used (resets the idle clock)."""
+        self._last_used = time.monotonic()
+
+    def idle_seconds(self) -> float | None:
+        """Seconds since the model was last used, or None if nothing is loaded."""
+        if self._llm is None:
+            return None
+        return time.monotonic() - self._last_used
+
+    def _teardown(self) -> bool:
+        """Free the loaded model. Caller MUST hold ``self._lock``.
+
+        Also resets the context floor, so the next load starts at the user's
+        configured n_ctx rather than any size a previous overflow grew it to.
+        """
+        if self._llm is None:
+            return False
+        # Llama.close() frees the model and unmaps the file; fall back to just
+        # dropping the reference if this build lacks it.
+        try:
+            close = getattr(self._llm, "close", None)
+            if callable(close):
+                close()
+        except Exception:  # noqa: BLE001 - best-effort release, never fatal
+            log.debug("Error closing model", exc_info=True)
+        self._llm = None
+        self._signature = None
+        self._ctx_floor = 0
+        gc.collect()  # Prod CPython to drop the handle promptly (Windows).
+        log.info("Unloaded model")
+        return True
 
     def unload(self, model_name: str | None = None) -> bool:
         """Release the cached model so its file is no longer open.
@@ -332,30 +404,33 @@ class _Worker:
         memory-mapped (and the file locked) for as long as it's loaded.
         """
         with self._lock:
-            if self._llm is None:
-                return False
             if model_name is not None and (
                 self._signature is None or self._signature[0] != model_name
             ):
                 return False
-            # Llama.close() frees the model and unmaps the file; fall back to
-            # just dropping the reference if this build lacks it.
-            try:
-                close = getattr(self._llm, "close", None)
-                if callable(close):
-                    close()
-            except Exception:  # noqa: BLE001 - best-effort release, never fatal
-                log.debug("Error closing model", exc_info=True)
-            self._llm = None
-            self._signature = None
-            gc.collect()  # Prod CPython to drop the handle promptly (Windows).
-            log.info("Unloaded model")
-            return True
+            return self._teardown()
+
+    def unload_if_idle(self, min_idle_seconds: float) -> bool:
+        """Unload the model if it has been idle at least ``min_idle_seconds``.
+
+        Re-checks the idle time while holding the lock, so a turn that started
+        right after the watcher's check is never unloaded out from under it (the
+        lock is held throughout generation, so this blocks until any in-flight
+        turn finishes, then sees a fresh _last_used and declines).
+        """
+        with self._lock:
+            if self._llm is None or (time.monotonic() - self._last_used) < min_idle_seconds:
+                return False
+            log.info("Unloading idle model (idle %.0fs)", time.monotonic() - self._last_used)
+            return self._teardown()
 
     def _load_if_needed(self, model_name: str) -> None:
         """(Re)load the model if the file or load-time settings changed."""
         s = config.get()
-        sig = (model_name, s.n_ctx, s.n_gpu_layers, s.n_threads)
+        # The effective context is the user's setting, but never below a floor a
+        # previous overflow raised (see _grow_ctx_floor), so big files keep fitting.
+        n_ctx = max(s.n_ctx, self._ctx_floor)
+        sig = (model_name, n_ctx, s.n_gpu_layers, s.n_threads)
         if self._llm is not None and self._signature == sig:
             return
 
@@ -372,11 +447,11 @@ class _Worker:
             raise EngineError(f"Model '{model_name}' is not downloaded.")
 
         log.info("Loading model %s (n_ctx=%d, n_gpu_layers=%d, n_threads=%d)",
-                 model_name, s.n_ctx, s.n_gpu_layers, s.n_threads)
+                 model_name, n_ctx, s.n_gpu_layers, s.n_threads)
         try:
             self._llm = Llama(
                 model_path=str(path),
-                n_ctx=s.n_ctx,
+                n_ctx=n_ctx,
                 n_gpu_layers=s.n_gpu_layers,
                 n_threads=s.n_threads or None,  # None lets llama.cpp auto-pick.
                 verbose=False,
@@ -397,6 +472,51 @@ class _Worker:
         self._signature = sig
         log.info("Model %s loaded", model_name)
 
+    def _model_train_ctx(self) -> int | None:
+        """The context length the loaded model was trained for, from its metadata."""
+        metadata = getattr(self._llm, "metadata", None) or {}
+        for key, value in metadata.items():
+            if key.endswith(".context_length"):
+                try:
+                    return int(value)
+                except (TypeError, ValueError):
+                    return None
+        return None
+
+    def _grow_ctx_floor(self, exc: Exception) -> bool:
+        """If ``exc`` is a context overflow, raise the floor to fit and return True.
+
+        Returns True when the floor grew (the caller should reload and retry),
+        False when ``exc`` isn't an overflow or we're already as large as we can
+        go (capped, and never beyond what the model was trained for).
+        """
+        match = _CTX_REQUESTED_RE.search(str(exc))
+        if not match:
+            return False
+        cap = _CTX_GROW_CAP
+        train = self._model_train_ctx()
+        if train:
+            cap = min(cap, train)
+        target = min(_round_up_ctx(int(match.group(1)) + 256), cap)
+        current = self._llm.n_ctx() if self._llm is not None else 0
+        if target <= max(current, self._ctx_floor):
+            return False  # Can't grow any further.
+        self._ctx_floor = target
+        log.info("Prompt exceeded context; growing context window to %d and retrying", target)
+        return True
+
+    def _call_with_ctx_retry(self, model_name: str, make_call):
+        """Load the model and run ``make_call()``; on a context overflow, grow the
+        context window once and retry. ``make_call`` uses ``self._llm``."""
+        for attempt in range(2):
+            self._load_if_needed(model_name)
+            try:
+                return make_call()
+            except Exception as exc:  # noqa: BLE001 - inspect, then grow-and-retry or re-raise
+                if attempt == 0 and self._grow_ctx_floor(exc):
+                    continue
+                raise
+
     def generate(self, model_name: str, messages: list[dict[str, str]],
                  options: dict[str, Any], loop: asyncio.AbstractEventLoop,
                  queue: asyncio.Queue) -> None:
@@ -410,23 +530,35 @@ class _Worker:
 
         try:
             with self._lock:
-                self._load_if_needed(model_name)
-                # Models without native tool support can't render tool messages;
-                # fold them into plain turns first (no-op for tool-free history).
-                if not _native_tools_supported(self._llm):
-                    messages = _flatten_tool_messages(messages)
-                stream = self._llm.create_chat_completion(
-                    messages=messages, stream=True, **options
-                )
-                for chunk in stream:
-                    delta = chunk["choices"][0]["delta"].get("content")
-                    if delta:
-                        emit(delta)
+                self._touch()
+                # Retry once at a larger context if the prompt overflows. The
+                # overflow is raised while evaluating the prompt - before any token
+                # is emitted - so retrying never double-emits streamed text.
+                for attempt in range(2):
+                    self._load_if_needed(model_name)
+                    # Models without native tool support can't render tool messages;
+                    # fold them into plain turns first (no-op for tool-free history).
+                    msgs = messages
+                    if not _native_tools_supported(self._llm):
+                        msgs = _flatten_tool_messages(messages)
+                    try:
+                        stream = self._llm.create_chat_completion(
+                            messages=msgs, stream=True, **options
+                        )
+                        for chunk in stream:
+                            delta = chunk["choices"][0]["delta"].get("content")
+                            if delta:
+                                emit(delta)
+                        break
+                    except Exception as exc:  # noqa: BLE001 - grow-and-retry or re-raise
+                        if attempt == 0 and self._grow_ctx_floor(exc):
+                            continue
+                        raise
         except EngineError as exc:
             emit(exc)
         except Exception as exc:  # noqa: BLE001 - surface any llama.cpp failure
             log.exception("Generation failed")
-            emit(EngineError(f"Generation failed: {exc}"))
+            emit(EngineError(_friendly_generation_error(exc)))
         finally:
             emit(_DONE)
 
@@ -439,11 +571,14 @@ class _Worker:
         the other paths, so it serialises with chat generation.
         """
         with self._lock:
-            self._load_if_needed(model_name)
-            if not _native_tools_supported(self._llm):
-                messages = _flatten_tool_messages(messages)
-            resp = self._llm.create_chat_completion(messages=messages, stream=False, **options)
-            return resp["choices"][0]["message"].get("content") or ""
+            self._touch()
+            def call() -> str:
+                msgs = messages
+                if not _native_tools_supported(self._llm):
+                    msgs = _flatten_tool_messages(messages)
+                resp = self._llm.create_chat_completion(messages=msgs, stream=False, **options)
+                return resp["choices"][0]["message"].get("content") or ""
+            return self._call_with_ctx_retry(model_name, call)
 
     def decide(self, model_name: str, messages: list[dict[str, Any]],
                tool_schemas: list[dict[str, Any]],
@@ -455,11 +590,13 @@ class _Worker:
         Blocking work, so it holds the per-model lock just like generation.
         """
         with self._lock:
-            self._load_if_needed(model_name)
-            try:
+            self._touch()
+            def call() -> Decision:
                 if _native_tools_supported(self._llm):
                     return self._decide_native(messages, tool_schemas, options)
                 return self._decide_grammar(messages, tool_schemas, options)
+            try:
+                return self._call_with_ctx_retry(model_name, call)
             except EngineError:
                 raise
             except Exception as exc:  # noqa: BLE001 - surface any llama.cpp failure
@@ -510,6 +647,16 @@ def unload(model_name: str | None = None) -> bool:
     was never used (no model loaded) - it's a no-op then.
     """
     return _worker.unload(model_name)
+
+
+def idle_seconds() -> float | None:
+    """Seconds since the model was last used, or None if nothing is loaded."""
+    return _worker.idle_seconds()
+
+
+def unload_if_idle(min_idle_seconds: float) -> bool:
+    """Unload the model if it has been idle for at least ``min_idle_seconds``."""
+    return _worker.unload_if_idle(min_idle_seconds)
 
 
 def supports_tools(model_name: str) -> bool:

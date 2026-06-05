@@ -29,7 +29,7 @@ import logging
 import re
 from typing import Any, AsyncIterator
 
-from . import config, engine, tool_router
+from . import config, database, engine, tool_context, tool_router
 from .tools import registry
 
 log = logging.getLogger("mocca.toolloop")
@@ -56,9 +56,12 @@ _USE_TOOLS = (
     "user's current request. If the user gives a YouTube link, use "
     "youtube_transcript to read the video's transcript. For any other web URL, "
     "use fetch_url to read that page; use web_search only to find information "
-    "when you do not have a URL. Call at most one tool at a time, and as soon as "
-    "you have the information you need, answer the user directly - do not call "
-    "additional, repeated, or unrelated tools."
+    "when you do not have a URL. If the user refers to an attached document or "
+    "asks you to change, edit, or add to a file, call read_document with that "
+    "filename FIRST to get its current contents - never edit a file you have not "
+    "read. Call at most one tool at a time, and as soon as you have the "
+    "information you need, answer the user directly - do not call additional, "
+    "repeated, or unrelated tools."
 )
 
 # Guards against the model fabricating tool use - claiming it searched or visited
@@ -150,8 +153,31 @@ async def run(
     messages: list[dict[str, Any]],
     *,
     options: dict[str, Any] | None = None,
+    session_id: str | None = None,
 ) -> AsyncIterator[dict[str, Any]]:
-    """Run one chat turn, yielding tool_call / tool_result / chunk events."""
+    """Run one chat turn, yielding tool_call / tool_result / chunk events.
+
+    ``session_id`` is bound into ``tool_context`` for the whole turn so
+    session-scoped tools (the document tools) read the right chat's files. The
+    binding brackets the entire generator body, so it is live across every
+    ``yield`` and the ``await registry.execute`` tool call, and is reset when the
+    turn ends (or the generator is closed early).
+    """
+    token = tool_context.set_session(session_id)
+    try:
+        async for event in _run(model_name, messages, options=options):
+            yield event
+    finally:
+        tool_context.reset_session(token)
+
+
+async def _run(
+    model_name: str,
+    messages: list[dict[str, Any]],
+    *,
+    options: dict[str, Any] | None = None,
+) -> AsyncIterator[dict[str, Any]]:
+    """The actual turn logic; ``run`` wraps it with the session context binding."""
     settings = config.get()
     # Offer only the tool categories relevant to the user's latest message. The
     # verbose tool schemas dominate decision latency on CPU, so narrowing them for
@@ -165,6 +191,17 @@ async def run(
     # in memory_extractor; see the chat route.)
     active = registry.active_categories(settings.enable_web_search)
     categories = await tool_router.choose_categories(model_name, user_text, active)
+    # If this chat has attached documents, always keep the document tools in scope,
+    # even if the router didn't pick them. Small models often read "edit
+    # settings.json" as "write a new settings.json" and skip the documents
+    # category, then generate from scratch and lose the user's content. Forcing
+    # read_document into scope lets the decision step read the file first (the
+    # _USE_TOOLS nudge tells it to). The cost is one small extra schema, and only
+    # in chats that actually have documents.
+    sid = tool_context.current_session_id()
+    session_docs = database.list_documents(sid) if sid else []
+    if session_docs and "documents" in active and "documents" not in categories:
+        categories = sorted({*categories, "documents"})
     schemas = registry.schemas(categories)
 
     # No tools to offer (none enabled, or engine missing) -> plain streamed turn.
@@ -176,6 +213,20 @@ async def run(
     # Decision context: tool instructions + history, persona dropped (see
     # _decision_context). Never persisted; the route saves the answer.
     awareness = _build_awareness(active)
+    # The decision step does NOT see the system prompt (and so not the document
+    # manifest), so name the attached documents here. Without this, the model
+    # guesses a filename from the user's words ("the readme") and read_document
+    # misses when the stored name differs (e.g. an earlier generated file saved as
+    # document.md). Listing the exact names lets it pick the right one.
+    if session_docs:
+        names = ", ".join(d["filename"] for d in session_docs)
+        awareness += (
+            "\n\nThis chat has attached documents: " + names + ". To answer "
+            "about one or to edit it, call read_document with its EXACT filename "
+            "from this list first. Choose the one the user means (for example, a "
+            "request about \"the readme\" or \"the doc you wrote\" refers to the "
+            "matching document in the list)."
+        )
     decision_convo = _decision_context(messages, awareness)
     # This turn's tool call/result messages, kept apart so we can build a focused
     # final-answer context from them (see below).

@@ -10,4 +10,6 @@ export const state = {
   catalogSource: "huggingface",  // "fallback" when HF was unreachable.
   sending: false,
   draggingId: null,      // Id of the chat currently being dragged, or null.
+  documents: [],         // Documents attached to the current chat: {id, filename, source, content?}.
+  activeDocumentId: null, // Id of the document shown in the side panel, or null.
 };

@@ -17,9 +17,9 @@ from fastapi.responses import HTMLResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
-from . import catalog, database, engine
+from . import catalog, config, database, engine
 from .paths import STATIC_DIR, TEMPLATES_DIR
-from .routes import chat, folders, memory, models, sessions, system
+from .routes import chat, documents, folders, memory, models, sessions, system
 from .tools import registry as tools
 from .version import __version__
 
@@ -48,6 +48,26 @@ class RevalidatingStaticFiles(StaticFiles):
         return response
 
 
+# How often the idle-unload watcher checks (seconds). Coarse on purpose: this is
+# a memory-reclaim convenience, not something that needs to be precise.
+_IDLE_CHECK_SECONDS = 60
+
+
+async def _idle_unload_watcher() -> None:
+    """Unload the model after it has been idle past the configured threshold.
+
+    Frees the multi-GB model (and any grown KV cache) when a chat is left
+    unattended; the next message reloads it. Runs the actual unload in a thread
+    because it briefly takes the engine lock. Gated on the user's
+    ``unload_idle_minutes`` setting (0 = never).
+    """
+    while True:
+        await asyncio.sleep(_IDLE_CHECK_SECONDS)
+        minutes = config.get().unload_idle_minutes
+        if minutes and minutes > 0 and (engine.idle_seconds() or 0) >= minutes * 60:
+            await asyncio.to_thread(engine.unload_if_idle, minutes * 60)
+
+
 @asynccontextmanager
 async def lifespan(_app: FastAPI):
     """Boot/shutdown tasks. (Logging/config are set up by run.py first.)"""
@@ -58,10 +78,13 @@ async def lifespan(_app: FastAPI):
     # network errors, so if we're offline it just doesn't populate (the UI shows
     # an offline message and offers Refresh). Never delays or breaks startup.
     prefetch = asyncio.create_task(catalog.get_catalog())
+    # Reclaim model memory when a chat is left idle (see _idle_unload_watcher).
+    idle_watcher = asyncio.create_task(_idle_unload_watcher())
     log.info("Mocca server started (engine available: %s)", engine.is_available())
     yield
-    if not prefetch.done():
-        prefetch.cancel()
+    for task in (prefetch, idle_watcher):
+        if not task.done():
+            task.cancel()
     log.info("Mocca server stopping")
 
 
@@ -91,5 +114,6 @@ app.include_router(system.router)
 app.include_router(models.router)
 app.include_router(folders.router)
 app.include_router(sessions.router)
+app.include_router(documents.router)
 app.include_router(chat.router)
 app.include_router(memory.router)

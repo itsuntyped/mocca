@@ -61,6 +61,13 @@ class Settings:
     # CPU threads for generation. 0 = let llama.cpp pick automatically.
     n_threads: int = 0
 
+    # Minutes of inactivity after which the loaded model is unloaded to free
+    # memory (the multi-GB model plus its KV cache). On by default; the next
+    # message simply reloads it. 0 disables, keeping the model resident. This also
+    # resets any temporarily grown context window back to n_ctx (see engine's
+    # context auto-grow).
+    unload_idle_minutes: int = 15
+
     # Verbosity of the application log. One of: DEBUG, INFO, WARNING, ERROR.
     log_level: str = "INFO"
 

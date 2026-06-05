@@ -25,6 +25,8 @@ from .harness import (
     answer_matches,
     answer_not_matches,
     called_tool,
+    document_any_contains,
+    document_contains,
     memory_category,
     memory_contains,
     memory_count_at_least,
@@ -102,8 +104,8 @@ SCENARIOS: list[Scenario] = [
     Scenario(
         name="memory-skips-file-edit",
         area="memory",
-        messages=["I changed the introduction. Now add a quick start section to this file."],
-        open_files=[("README.md", _OPEN_FILE)],
+        messages=["I changed the introduction. Now add a quick start section to README.md."],
+        documents=[("README.md", _OPEN_FILE)],
         checks=[no_memories()],
     ),
     Scenario(
@@ -145,6 +147,24 @@ SCENARIOS: list[Scenario] = [
         area="tools",
         messages=["hey there, how's your day going?"],
         checks=[no_tools()],
+    ),
+    # Documents: the model must READ an attached file (via the tool) to answer a
+    # question about it, rather than guessing. The sentinel fact appears only in
+    # the file, so a correct answer proves it was read. Resolves offline.
+    Scenario(
+        name="doc-qa-reads-tool",
+        area="tools",
+        documents=[(
+            "facts.md",
+            "# Facts\n\nThe capital of Freedonia is Klopstokia.\n"
+            "Our mascot is a purple otter named Sprog.\n",
+        )],
+        messages=["According to the attached facts.md, what is the capital of Freedonia?"],
+        checks=[
+            called_tool("read_document"),
+            tool_arg_contains("read_document", "facts.md"),
+            answer_contains("Klopstokia"),
+        ],
     ),
     # Guards the model-based router specifically: a question that clearly needs a
     # live lookup but contains NO routing keyword ("search", "look up", a URL).
@@ -190,33 +210,56 @@ SCENARIOS: list[Scenario] = [
             "tracking link for the user to open, without inventing a delivery status."
         ),
     ),
-    # --- Artifacts: editing the file open in the side panel -------------------
-    # These guard the open-file continuity feature and the two bugs we fixed:
-    # (1) an edit must preserve the user's existing content and apply the change,
-    # (2) chit-chat must NOT regenerate the file, and (3) an edit must build on
-    # the file the user has open, not on the model's own earlier copy in history.
-    # The sentinel key in _OPEN_FILE proves which version the model worked from.
+    # --- Documents: editing an attached file ----------------------------------
+    # The model must read the attached file, then return the COMPLETE updated file
+    # so it is written back. The sentinel key in _OPEN_FILE proves the existing
+    # content was preserved (not regenerated from scratch). document_contains
+    # asserts the change actually landed in the stored document.
     Scenario(
-        name="open-file-edit-applies-and-preserves",
+        name="doc-edit-applies-and-preserves",
         area="artifact",
-        messages=['Add a field "version" set to "2.0".'],
-        open_files=[("settings.json", _OPEN_FILE)],
+        documents=[("settings.json", _OPEN_FILE)],
+        messages=['Add a field "version" set to "2.0" to the attached settings.json.'],
         checks=[
-            answer_matches(r"```"),               # returned the file as a code block
+            called_tool("read_document"),         # read the file before editing
             answer_contains("version"),           # applied the requested change
             answer_contains("DO_NOT_REMOVE_42"),  # kept the existing content verbatim
+            document_contains("settings.json", "version"),  # the edit was written back
         ],
         judge=(
             "The reply should return the whole settings.json with a version field "
             "added and every existing field (including keepThisKey) kept intact."
         ),
     ),
+    # The tricky case the user flagged: a file the model GENERATED (so it named
+    # itself, no upload) must still be editable later, even with another document
+    # also attached. Turn 1 generates a readme; turn 2 edits it. The edit must read
+    # the generated file and land an Installation section in some document (its
+    # name is the model's choice, so assert filename-agnostically).
     Scenario(
-        name="open-file-chitchat-no-regen",
+        name="doc-edit-generated-file-later",
         area="artifact",
+        documents=[("config.json", '{\n  "port": 8080,\n  "debug": false\n}\n')],
+        messages=[
+            "Write a short markdown README for a project called Acme. Keep it under 10 lines.",
+            "Now add an Installation section to that readme.",
+        ],
+        checks=[
+            called_tool("read_document"),               # read the generated file to edit it
+            answer_contains("Installation"),            # applied the change
+            document_any_contains("Installation"),      # and it was written back
+        ],
+        judge=(
+            "The second reply should update the README the assistant wrote earlier "
+            "with an Installation section, not touch config.json or start a new file."
+        ),
+    ),
+    Scenario(
+        name="doc-chitchat-no-regen",
+        area="artifact",
+        documents=[("settings.json", _OPEN_FILE)],
         messages=["thank you, that's perfect"],
-        open_files=[("settings.json", _OPEN_FILE)],
-        # The bug was: with a file open, even a thank-you re-emitted the file.
+        # A thank-you must NOT re-emit or rewrite the attached file.
         checks=[
             answer_not_matches(r"```"),               # no code block
             answer_not_matches("DO_NOT_REMOVE_42"),   # didn't echo the file contents
@@ -224,28 +267,6 @@ SCENARIOS: list[Scenario] = [
         judge=(
             "A brief, friendly acknowledgement is ideal; offering further help is "
             "also fine. The only real failure is repeating or regenerating the file."
-        ),
-    ),
-    Scenario(
-        name="open-file-uses-current-not-history",
-        area="artifact",
-        messages=[
-            "Create a short JSON config for a small web app - just a few fields.",
-            'Now add a field "version" set to "2.0".',
-        ],
-        # Turn 1 generates some JSON into history; turn 2 opens a DIFFERENT file
-        # (with the sentinel). A correct edit builds on the open file, so the
-        # sentinel must survive - if the model copied its own turn-1 output, it
-        # would be absent. This is the "competing copy" regression guard.
-        open_files=[None, ("config.json", _OPEN_FILE)],
-        checks=[
-            answer_contains("DO_NOT_REMOVE_42"),  # edited the open file, not its own
-            answer_contains("version"),           # applied the change
-        ],
-        judge=(
-            "Good if the version field is added to the file the user has open (the "
-            "one containing keepThisKey). Restating the whole updated file is fine; "
-            "what matters is that it builds on the open file, not a different one."
         ),
     ),
 ]

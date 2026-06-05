@@ -56,8 +56,12 @@ _CATEGORY_HINTS: dict[str, list[str]] = {
              "percentage", "equation", "math", "arithmetic"],
     "time": ["time", "date", "today", "now", "day", "year", "month", "clock",
              "timezone", "tomorrow", "yesterday", "hour"],
-    "files": ["file", "files", "read", "document", "documents", "folder",
-              "notes", "txt", ".md"],
+    "files": ["file", "files", "read", "folder", "notes", "txt", ".md"],
+    # Documents attached to THIS chat (uploaded or AI-authored), read on demand
+    # via read_document. Distinct from "files" (the global data/files drop folder).
+    "documents": ["document", "documents", "attached", "attachment", "uploaded",
+                  "upload", "this file", "the file", "the doc", "my file",
+                  "the readme", ".md", ".txt", ".json"],
     "web": ["search", "google", "web", "online", "internet", "latest", "news",
             "look up", "website", "url", "link", "github", "repo", "repository",
             "repositories", "browse", "fetch", "wiki"],

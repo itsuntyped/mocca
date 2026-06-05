@@ -1,12 +1,12 @@
 import { el, autoGrow } from "./dom.js";
 import { loadSidebar, createSession, createFolder, openSidebar, closeSidebar } from "./sidebar.js";
-import { enableRootDrop } from "./dragdrop.js";
+import { enableRootDrop, enableComposerDrop } from "./dragdrop.js";
 import { sendMessage } from "./chat.js";
 import { openModels, pullManual, switchTab, checkHealth, loadModels, cancelDownload, refreshCatalog } from "./models.js";
 import { loadSettings, saveSettings } from "./settings.js";
 import { openMemory, toggleMemory, clearMemories } from "./memory.js";
-import { closeArtifact, copyArtifact, downloadArtifact } from "./artifacts.js";
-import { copyIcon, downloadIcon, closeIcon } from "./icons.js";
+import { closeDocumentPanel, copyActiveDocument, downloadActiveDocument, uploadFiles, showDocumentPanel } from "./documents.js";
+import { copyIcon, downloadIcon, closeIcon, attachIcon, fileSvg } from "./icons.js";
 
 function boot() {
   // Sidebar actions.
@@ -40,6 +40,20 @@ function boot() {
     sendMessage(text);
   });
 
+  // Attach files: the button opens the hidden file input; choosing files (or
+  // dropping them on the composer) uploads them as documents.
+  el("attach").innerHTML = attachIcon();
+  el("attach").onclick = () => el("file-input").click();
+  el("file-input").onchange = (e) => {
+    uploadFiles(e.target.files);
+    e.target.value = "";  // Allow re-selecting the same file later.
+  };
+  enableComposerDrop();
+
+  // Reopen the documents panel after it has been closed.
+  el("docs-toggle").innerHTML = fileSvg() + '<span class="docs-toggle-count"></span>';
+  el("docs-toggle").onclick = showDocumentPanel;
+
   // Settings modal.
   el("save-settings").onclick = saveSettings;
 
@@ -59,14 +73,14 @@ function boot() {
     tab.onclick = () => switchTab(tab.dataset.tab);
   }
 
-  // Artifact panel: icons live in icons.js, so paint them in here, then wire
-  // the copy / download / close actions.
+  // Document panel: icons live in icons.js, so paint them in here, then wire
+  // the copy / download / close actions to the active document.
   el("artifact-copy").innerHTML = copyIcon();
   el("artifact-download").innerHTML = downloadIcon();
   el("artifact-close").innerHTML = closeIcon();
-  el("artifact-copy").onclick = copyArtifact;
-  el("artifact-download").onclick = downloadArtifact;
-  el("artifact-close").onclick = closeArtifact;
+  el("artifact-copy").onclick = copyActiveDocument;
+  el("artifact-download").onclick = downloadActiveDocument;
+  el("artifact-close").onclick = closeDocumentPanel;
 
   // Engine banner retry.
   el("banner-retry").onclick = checkHealth;

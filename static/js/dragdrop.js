@@ -2,6 +2,7 @@ import { el } from "./dom.js";
 import { api } from "./api.js";
 import { state } from "./state.js";
 import { loadSidebar } from "./sidebar.js";
+import { uploadFiles } from "./documents.js";
 
 // Make a chat row draggable with the mouse.
 export function enableChatDrag(item, id) {
@@ -49,6 +50,28 @@ export function enableRootDrop() {
     list.classList.remove("drop-root");
     const id = state.draggingId || e.dataTransfer.getData("text/plain");
     if (id) moveSession(id, null);
+  });
+}
+
+// Make the composer a drop zone for files: dropping text files there attaches
+// them as documents (the same as the upload button). Distinct from the chat-row
+// drag above - here we care about e.dataTransfer.files, not a dragged chat id.
+export function enableComposerDrop() {
+  const composer = el("composer");
+  composer.addEventListener("dragover", (e) => {
+    // Only react to an actual file drag, not a chat row being moved.
+    if (![...e.dataTransfer.types].includes("Files")) return;
+    e.preventDefault();
+    composer.classList.add("drop-target");
+  });
+  composer.addEventListener("dragleave", (e) => {
+    if (!composer.contains(e.relatedTarget)) composer.classList.remove("drop-target");
+  });
+  composer.addEventListener("drop", (e) => {
+    if (!e.dataTransfer.files || !e.dataTransfer.files.length) return;
+    e.preventDefault();
+    composer.classList.remove("drop-target");
+    uploadFiles(e.dataTransfer.files);
   });
 }
 

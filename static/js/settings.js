@@ -11,6 +11,7 @@ export async function loadSettings() {
   el("set-nctx").value = s.n_ctx;
   el("set-ngpu").value = s.n_gpu_layers;
   el("set-nthreads").value = s.n_threads;
+  el("set-idle-unload").value = s.unload_idle_minutes;
   el("set-loglevel").value = s.log_level;
   // Web search is the only network toggle; everything local stays on.
   el("set-web-search").checked = s.enable_web_search;
@@ -31,6 +32,7 @@ export async function saveSettings(e) {
       n_ctx: parseInt(el("set-nctx").value, 10),
       n_gpu_layers: parseInt(el("set-ngpu").value, 10),
       n_threads: parseInt(el("set-nthreads").value, 10),
+      unload_idle_minutes: parseInt(el("set-idle-unload").value, 10),
       log_level: el("set-loglevel").value,
       enable_web_search: el("set-web-search").checked,
     }),

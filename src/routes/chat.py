@@ -38,7 +38,10 @@ _FORMATTING_NOTE = (
     "Format replies in Markdown. When you show a fenced code block that itself "
     "contains a fenced code block (for example, a README that includes code), "
     "wrap the OUTER block in four backticks (````) so the inner triple-backtick "
-    "fences render as literal text."
+    "fences render as literal text. When you write out the full contents of a "
+    "file (rather than a short snippet), put a clear filename on the opening "
+    "fence, for example ```readme.md or ```app.py, so it can be saved and edited "
+    "later."
 )
 
 
@@ -75,33 +78,37 @@ def _memory_block(memories: list[dict]) -> str:
     )
 
 
-def _open_file_block(title: str, content: str) -> str:
-    """Render the "file currently open in the editor" section of the prompt.
+# Cap how many filenames we list in the manifest, so a chat with a huge number of
+# documents can't bloat every system prompt. The contents are never injected
+# (the model reads them on demand via read_document), so this is just the list.
+_MANIFEST_MAX = 50
 
-    This is what gives the side-panel editor continuity with the chat: when the
-    user has an artifact open and asks for a change, we hand the model the file's
-    *current* contents (including any edits they typed by hand) and tell it to
-    return the whole updated file, so the next reply builds on what they're
-    actually looking at rather than on whatever it generated last.
+
+def _documents_manifest(docs: list[dict]) -> str:
+    """Render the "documents attached to this chat" section of the prompt.
+
+    Crucially this lists only the filenames, never the contents: the model reads a
+    document on demand with the read_document tool, so the prompt stays small even
+    with several large files. It also carries the editing protocol - read first,
+    then return the COMPLETE updated file labelled with its filename - so the
+    side-panel editor updates with a faithful, whole-file edit.
     """
-    named = f" named {title}" if title.strip() else ""
+    shown = docs[:_MANIFEST_MAX]
+    names = "\n".join(f"- {d['filename']}" for d in shown)
+    extra = "" if len(docs) <= _MANIFEST_MAX else f"\n- ...and {len(docs) - _MANIFEST_MAX} more"
     return (
-        f"The user currently has a file open in the editor{named}. It may include "
-        "edits they made by hand, so the version between the markers below is the "
-        "ONLY current, authoritative version. Any earlier copy of this file that "
-        "appears earlier in the conversation is outdated - ignore it.\n"
-        "When the user asks you to change, add to, or fix this file: start from "
-        "the version below and keep every part they did not ask you to change "
-        "exactly as it is, word for word. Then reply with the COMPLETE updated "
-        "file in a single fenced code block (not a diff, not only the changed "
-        "lines), so it opens in their editor.\n"
-        "But if the user's latest message is NOT a request to change the file - "
-        "for example small talk, a thank-you, or a general question - just reply "
-        "normally in a sentence or two and do NOT output the file again. Only "
-        "produce the file when they actually ask for a change to it.\n"
-        "--- BEGIN CURRENT FILE ---\n"
-        f"{content}\n"
-        "--- END CURRENT FILE ---"
+        "Documents attached to this chat (the user uploaded them, or you created "
+        "them). You do NOT have their contents here - only their names:\n"
+        f"{names}{extra}\n"
+        "When the user's message is about one of these documents, call "
+        "read_document with its exact filename to read it before answering - never "
+        "guess or invent a document's contents. When the user asks you to change a "
+        "document: read it first, then reply with the COMPLETE updated file in a "
+        "single fenced code block whose info line is the filename (for example "
+        "```notes.md) - not a diff and not only the changed lines - so it updates "
+        "in their editor. You can edit several documents by returning one such "
+        "block per file. For an ordinary question or small talk, just reply "
+        "normally and do not output a file."
     )
 
 
@@ -138,20 +145,154 @@ def _collapse_code_blocks(text: str, min_lines: int = 4) -> str:
     return "\n".join(out)
 
 
-class OpenFile(BaseModel):
-    """The artifact the user has open in the side panel, sent with a message."""
+# File-block detection for document write-back. Kept in sync with the frontend's
+# artifacts.js (FILE_LANGS / MIN_LINES / filename rule) so what the server
+# persists as a document matches what the panel would show as a file. A block
+# becomes a document when it is long enough AND either names a file in its info
+# line or uses a file-ish language.
+_FILE_LANGS = {
+    "markdown", "md", "html", "htm", "xml", "css", "scss", "sass", "json",
+    "jsonc", "yaml", "yml", "toml", "ini", "conf", "csv", "tsv", "sql", "js",
+    "javascript", "jsx", "ts", "typescript", "tsx", "py", "python", "sh",
+    "bash", "zsh", "c", "cpp", "h", "hpp", "java", "go", "rust", "rs", "rb",
+    "ruby", "php", "dockerfile", "makefile", "txt", "text", "env",
+}
+_LANG_EXT = {
+    "markdown": "md", "md": "md", "html": "html", "htm": "html", "xml": "xml",
+    "css": "css", "json": "json", "jsonc": "json", "yaml": "yml", "yml": "yml",
+    "toml": "toml", "ini": "ini", "conf": "conf", "csv": "csv", "tsv": "tsv",
+    "sql": "sql", "js": "js", "javascript": "js", "ts": "ts", "typescript": "ts",
+    "py": "py", "python": "py", "sh": "sh", "bash": "sh", "txt": "txt", "text": "txt",
+}
+_MIN_FILE_LINES = 6
+_FILENAME_TOKEN = re.compile(r"^[\w.\-/]+\.[A-Za-z0-9]+$")
 
-    title: str = ""
-    content: str = ""
+
+def _extract_file_blocks(text: str) -> list[tuple[str | None, str, str]]:
+    """Pull file-worthy fenced code blocks from a reply as (filename, content, ext).
+
+    ``filename`` is the token from the fence info line when present (the manifest
+    asks the model to label an edited file's block with its name), else None - in
+    which case a name is derived from ``ext`` (the language's extension) at
+    write-back. Mirrors artifacts.js: a Markdown block closes at its LAST bare
+    fence (it may contain its own fences); any other language closes at the first
+    matching fence.
+    """
+    lines = text.replace("\r\n", "\n").replace("\r", "\n").split("\n")
+    blocks: list[tuple[str | None, str, str]] = []
+    i = 0
+    while i < len(lines):
+        m = re.match(r"^(\s*)(`{3,})(.*)$", lines[i])
+        if not m:
+            i += 1
+            continue
+        fence_len = len(m.group(2))
+        info = m.group(3).strip()
+        parts = info.split()
+        first = parts[0] if parts else ""
+        lang = first.lower()
+        # The info line names a file when its first token looks like one.
+        filename = first if (parts and _FILENAME_TOKEN.match(first)) else None
+        if lang in ("markdown", "md"):
+            close = -1
+            for k in range(i + 1, len(lines)):
+                if re.match(r"^\s*`{3,}\s*$", lines[k]):
+                    close = k
+        else:
+            close_re = re.compile(r"^\s*`{%d,}\s*$" % fence_len)
+            close = i + 1
+            while close < len(lines) and not close_re.match(lines[close]):
+                close += 1
+        end = close if close > i else len(lines)
+        content = "\n".join(lines[i + 1:end])
+        n_lines = len(content.split("\n")) if content else 0
+        if (lang in _FILE_LANGS or filename) and n_lines >= _MIN_FILE_LINES:
+            blocks.append((filename, content, _LANG_EXT.get(lang, "txt")))
+        i = end + 1 if end < len(lines) else len(lines)
+    return blocks
+
+
+def _slug_from_content(content: str) -> str:
+    """A short filename stem from a document's title, or "" if none is obvious.
+
+    Looks for a Markdown H1 (``# Title``) first, else the first non-empty line if
+    it is short and prose-like. Keeps unlabelled generated files referable (an
+    "Acme" readme becomes acme.md, not document.md) so the user and the model can
+    name it later.
+    """
+    for line in content.splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        if line.startswith("#"):
+            line = line.lstrip("#").strip()
+        elif len(line) > 60 or any(c in line for c in "{}<>=;"):
+            return ""  # First line looks like code/data, not a title.
+        slug = re.sub(r"[^a-z0-9]+", "-", line.lower()).strip("-")
+        return slug[:40].strip("-")
+    return ""
+
+
+def _derive_filename(session_id: str, ext: str, content: str = "") -> str:
+    """A unique default name for an unlabelled generated file.
+
+    Prefers a name derived from the content's title (see _slug_from_content),
+    falling back to document.<ext>; de-duplicates against the session's existing
+    document names.
+    """
+    existing = {d["filename"].lower() for d in database.list_documents(session_id)}
+    stem = _slug_from_content(content) or "document"
+    base = f"{stem}.{ext}"
+    if base.lower() not in existing:
+        return base
+    n = 2
+    while f"{stem}-{n}.{ext}".lower() in existing:
+        n += 1
+    return f"{stem}-{n}.{ext}"
+
+
+def _write_back_documents(session_id: str, reply: str) -> bool:
+    """Persist file blocks from a reply as session documents. Returns True if any.
+
+    A labelled block is matched to an existing document by filename and updated in
+    place (so the read tool and the panel tab see the edit), else creates a new
+    ``source='assistant'`` document. An unlabelled block updates the session's
+    single document when there is exactly one (an obvious edit target); when the
+    session has no documents it creates a new one with a derived name (the
+    "generate a file from scratch" flow); when several exist it is skipped rather
+    than guessed which to overwrite.
+    """
+    blocks = _extract_file_blocks(reply)
+    if not blocks:
+        return False
+    docs = database.list_documents(session_id)
+    wrote = False
+    for filename, content, ext in blocks:
+        if not filename:
+            if len(docs) == 1:
+                database.update_document(docs[0]["id"], content)
+                wrote = True
+            elif not docs:
+                database.create_document(
+                    session_id, _derive_filename(session_id, ext, content), content,
+                    source="assistant",
+                )
+                wrote = True
+            # Several documents and no filename: skip rather than guess.
+            continue
+        existing = database.get_document_by_filename(session_id, filename)
+        if existing:
+            database.update_document(existing["id"], content)
+        else:
+            database.create_document(session_id, filename, content, source="assistant")
+        wrote = True
+    return wrote
 
 
 class ChatRequest(BaseModel):
     session_id: str
     model: str
     message: str
-    # Present only when the user has a file open in the editor; per-turn context,
-    # never persisted to history.
-    open_file: OpenFile | None = None
 
 
 @router.post("/api/chat")
@@ -186,21 +327,22 @@ async def chat(req: ChatRequest) -> StreamingResponse:
         system_text = f"{system_text}\n\n{block}" if system_text else block
     # Always include the Markdown-formatting guidance (see _FORMATTING_NOTE).
     system_text = f"{system_text}\n\n{_FORMATTING_NOTE}" if system_text else _FORMATTING_NOTE
-    # If the user has a file open in the editor, fold its current contents in so
-    # follow-up edits build on the real, possibly hand-edited state (see
-    # _open_file_block). This is per-turn context only - never stored in history.
-    editing_file = bool(req.open_file and req.open_file.content.strip())
-    if editing_file:
-        log.info("open_file context: title=%r (%d chars)", req.open_file.title, len(req.open_file.content))
-        system_text += "\n\n" + _open_file_block(req.open_file.title, req.open_file.content)
+    # List any documents attached to this chat (filenames only) so the model knows
+    # what it can read with read_document and how to return an edit. Contents are
+    # never injected - they are read on demand (see _documents_manifest).
+    docs = database.list_documents(req.session_id)
+    has_documents = bool(docs)
+    if has_documents:
+        log.info("documents in scope: %d (%s)", len(docs), ", ".join(d["filename"] for d in docs[:5]))
+        system_text += "\n\n" + _documents_manifest(docs)
 
     messages: list[dict[str, str]] = []
     if system_text:
         messages.append({"role": "system", "content": system_text})
-    if editing_file:
-        # The open file is the single source of truth this turn, so strip the
-        # stale full-file copies out of the history we feed the engine - otherwise
-        # the model copies its own earlier message and drops the user's edits.
+    if has_documents:
+        # The freshly-read document is the source of truth, so strip stale
+        # full-file copies out of the history we feed the engine - otherwise a
+        # small model copies its own earlier message instead of the current file.
         for m in history:
             if m["role"] == "assistant":
                 messages.append({**m, "content": _collapse_code_blocks(m["content"])})
@@ -220,7 +362,9 @@ async def chat(req: ChatRequest) -> StreamingResponse:
         # Tool call arguments stashed by id so we can store them with the result.
         pending: dict[str, dict] = {}
         try:
-            async for event in tool_loop.run(req.model, messages, options=options):
+            async for event in tool_loop.run(
+                req.model, messages, options=options, session_id=req.session_id
+            ):
                 if "chunk" in event:
                     collected.append(event["chunk"])
                     yield sse({"chunk": event["chunk"]})
@@ -246,14 +390,20 @@ async def chat(req: ChatRequest) -> StreamingResponse:
             reply = "".join(collected)
             if reply:
                 database.add_message(req.session_id, "assistant", reply)
+                # Persist any file the model returned as a session document: an
+                # edit to an attached file updates it in place; a new file becomes
+                # a new tab. Done here so the read tool and the panel see the
+                # change on the next turn / refresh.
+                edited_document = _write_back_documents(req.session_id, reply)
                 # Capture durable facts in the background (after the reply, while
                 # the model is idle) - never blocks the response. Gated on the
                 # memory toggle and a quick "is this about the user?" check so
                 # ordinary Q&A turns don't trigger an extra LLM call. We also skip
-                # file-edit turns: those are about the open file ("add a section",
-                # "change the intro"), not durable facts about the user - capturing
-                # them just pollutes memory with one-off task actions.
-                if settings.enable_memory and not editing_file and memory_extractor.looks_personal(req.message):
+                # turns that edited a document: those are one-off task actions
+                # ("add a section", "fix the intro"), not durable facts about the
+                # user - capturing them just pollutes memory.
+                if (settings.enable_memory and not edited_document
+                        and memory_extractor.looks_personal(req.message)):
                     convo = database.get_messages(req.session_id)
                     task = asyncio.create_task(
                         memory_extractor.extract_and_store(req.model, convo)

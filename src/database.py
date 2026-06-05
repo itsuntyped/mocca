@@ -2,12 +2,19 @@
 
 Why SQLite: it's in the Python standard library (no extra dependency),
 single-file, and trivially portable between Windows and Arch - which matches
-Mocca's "simple, local, no setup" goal. The schema is four tables:
+Mocca's "simple, local, no setup" goal. The schema is five tables:
 
     folders(id, name, created_at, updated_at)
     sessions(id, title, model, folder_id, favorite, created_at, updated_at)
     messages(id, session_id, role, content, created_at)
     memories(id, content, created_at)
+    documents(id, session_id, filename, content, source, created_at, updated_at)
+
+``documents`` are the text files a chat works with: the user uploads them (or the
+AI authors one), they show as tabs in the side panel, and the model reads them on
+demand through the ``read_document`` tool. They are per-session (FK with cascade,
+so deleting a chat drops its documents) and stored only in the database - never on
+disk - so one chat can never read another's files.
 
 ``memories`` is Mocca's long-term, cross-chat memory: short, important facts
 about the user (their name, preferences, ...) that the AI saves via the
@@ -45,6 +52,30 @@ def _now() -> str:
 def _new_id() -> str:
     """Short, URL-safe unique id for a row."""
     return uuid.uuid4().hex
+
+
+# Cap on a stored document filename, so the UI tab/label and download name stay
+# sane and a pathological upload can't bloat a row's display.
+_MAX_FILENAME = 200
+
+
+def safe_filename(name: str) -> str:
+    """Reduce an uploaded name to a safe, bare filename.
+
+    Document content lives only in the database, so this never touches the
+    filesystem - but the name is shown as a tab, used to match the model's
+    edits back to a document, and used as a download name, so it must be clean.
+    We strip any directory components (defeating ``../`` and both separators on
+    either OS), drop control characters, bound the length, and fall back to a
+    default when nothing usable remains. Mirrors ``models.safe_filename``'s
+    "trust no user-supplied name" stance.
+    """
+    # Take the last path component regardless of which separator was used.
+    base = re.split(r"[\\/]", name or "")[-1]
+    # Drop control chars and leading/trailing dots+spaces (".." -> "", " x " -> "x").
+    base = "".join(ch for ch in base if ch.isprintable()).strip(" .")
+    base = base[:_MAX_FILENAME].strip()
+    return base or "document.txt"
 
 
 def _connect() -> sqlite3.Connection:
@@ -100,6 +131,20 @@ def init_db() -> None:
                 category    TEXT NOT NULL DEFAULT 'fact',
                 created_at  TEXT NOT NULL
             );
+
+            CREATE TABLE IF NOT EXISTS documents (
+                id          TEXT PRIMARY KEY,
+                session_id  TEXT NOT NULL,
+                filename    TEXT NOT NULL,
+                content     TEXT NOT NULL,
+                source      TEXT NOT NULL DEFAULT 'upload',  -- 'upload' | 'assistant'
+                created_at  TEXT NOT NULL,
+                updated_at  TEXT NOT NULL,
+                FOREIGN KEY (session_id) REFERENCES sessions(id) ON DELETE CASCADE
+            );
+
+            CREATE INDEX IF NOT EXISTS idx_documents_session
+                ON documents(session_id, created_at);
             """
         )
         _migrate(conn)
@@ -386,3 +431,100 @@ def clear_memories() -> int:
         cur = conn.execute("DELETE FROM memories")
     log.info("Cleared %d memories", cur.rowcount)
     return cur.rowcount
+
+
+# --------------------------------------------------------------------------- #
+# Documents (per-session text files the chat works with)
+# --------------------------------------------------------------------------- #
+
+def create_document(
+    session_id: str, filename: str, content: str, source: str = "upload"
+) -> dict[str, Any]:
+    """Store a document for a session and return it (content included).
+
+    ``source`` records where it came from: ``'upload'`` for a user upload,
+    ``'assistant'`` for a file the model authored. The filename is sanitised
+    here as a second line of defence (the route also does it). Creating a
+    document bumps the session's updated_at so it floats up the sidebar.
+    """
+    did = _new_id()
+    ts = _now()
+    name = safe_filename(filename)
+    with _connect() as conn:
+        conn.execute(
+            "INSERT INTO documents (id, session_id, filename, content, source, "
+            "created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
+            (did, session_id, name, content, source, ts, ts),
+        )
+        conn.execute(
+            "UPDATE sessions SET updated_at = ? WHERE id = ?", (ts, session_id)
+        )
+    log.debug("Created document %s (%s) in session %s", did, name, session_id)
+    return {
+        "id": did, "session_id": session_id, "filename": name, "content": content,
+        "source": source, "created_at": ts, "updated_at": ts,
+    }
+
+
+def list_documents(session_id: str) -> list[dict[str, Any]]:
+    """Return a session's documents (with content), oldest first (stable tabs)."""
+    with _connect() as conn:
+        rows = conn.execute(
+            "SELECT * FROM documents WHERE session_id = ? ORDER BY created_at, rowid",
+            (session_id,),
+        ).fetchall()
+    return [dict(r) for r in rows]
+
+
+def get_document(document_id: str) -> dict[str, Any] | None:
+    """Return one document by id, or None if it doesn't exist."""
+    with _connect() as conn:
+        row = conn.execute(
+            "SELECT * FROM documents WHERE id = ?", (document_id,)
+        ).fetchone()
+    return dict(row) if row else None
+
+
+def get_document_by_filename(session_id: str, filename: str) -> dict[str, Any] | None:
+    """Find a session document by filename (case-insensitive), newest wins.
+
+    Used by the read tool and by edit write-back to map a name the model used
+    back to a stored document. Newest-wins so a re-uploaded name resolves to the
+    most recent copy.
+    """
+    name = safe_filename(filename)
+    with _connect() as conn:
+        row = conn.execute(
+            "SELECT * FROM documents WHERE session_id = ? "
+            "AND filename = ? COLLATE NOCASE ORDER BY created_at DESC, rowid DESC",
+            (session_id, name),
+        ).fetchone()
+    return dict(row) if row else None
+
+
+def update_document(document_id: str, content: str) -> bool:
+    """Replace a document's content. Returns True if it existed."""
+    with _connect() as conn:
+        cur = conn.execute(
+            "UPDATE documents SET content = ?, updated_at = ? WHERE id = ?",
+            (content, _now(), document_id),
+        )
+    return cur.rowcount > 0
+
+
+def rename_document(document_id: str, filename: str) -> bool:
+    """Rename a document (sanitised). Returns True if it existed."""
+    with _connect() as conn:
+        cur = conn.execute(
+            "UPDATE documents SET filename = ?, updated_at = ? WHERE id = ?",
+            (safe_filename(filename), _now(), document_id),
+        )
+    return cur.rowcount > 0
+
+
+def delete_document(document_id: str) -> bool:
+    """Delete one document. Returns True if it existed."""
+    with _connect() as conn:
+        cur = conn.execute("DELETE FROM documents WHERE id = ?", (document_id,))
+    log.debug("Deleted document %s (existed=%s)", document_id, cur.rowcount > 0)
+    return cur.rowcount > 0

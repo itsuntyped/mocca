@@ -4,6 +4,7 @@ import { state } from "./state.js";
 import { starSvg, chevronSvg, pencilSvg, trashSvg } from "./icons.js";
 import { renderMessages, showEmptyState } from "./chat.js";
 import { enableChatDrag, enableFolderDrop, enableTouchMove } from "./dragdrop.js";
+import { loadDocuments } from "./documents.js";
 
 // Open the off-canvas sidebar (only visible as a drawer on small screens).
 export function openSidebar() {
@@ -184,13 +185,15 @@ async function toggleFavorite(s) {
   await loadSidebar();
 }
 
-// Open a chat: load it, highlight it, render its messages, close the drawer.
+// Open a chat: load it, highlight it, render its messages and documents, close
+// the drawer.
 async function selectSession(id) {
   state.currentSessionId = id;
   const session = await api(`/api/sessions/${id}`);
   if (session.model) el("model-select").value = session.model;
   updateActiveHighlight();
   renderMessages(session.messages);
+  await loadDocuments(id);
   closeSidebar();
 }
 

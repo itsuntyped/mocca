@@ -223,6 +223,30 @@ code {
   padding: 16px; tab-size: 2;
 }
 
+/* Tab strip: one tab per attached document, the active one highlighted. */
+.artifact-tabs {
+  display: flex; gap: 4px; padding: 6px 8px 0; overflow-x: auto;
+  background: var(--grey-850); border-bottom: 1px solid var(--border-soft);
+}
+.artifact-tabs:empty { display: none; }
+.artifact-tab {
+  display: flex; align-items: center; gap: 6px; flex-shrink: 0;
+  padding: 6px 8px 6px 10px; border-radius: var(--radius-sm) var(--radius-sm) 0 0;
+  background: var(--grey-800); color: var(--text-mid); cursor: pointer;
+  border: 1px solid var(--border); border-bottom: none; max-width: 200px;
+}
+.artifact-tab.active { background: var(--grey-900); color: var(--text); }
+.artifact-tab-name {
+  font-family: var(--mono); font-size: 12px; overflow: hidden;
+  text-overflow: ellipsis; white-space: nowrap;
+}
+.artifact-tab-del {
+  flex: none; width: 18px; height: 18px; line-height: 1; font-size: 15px;
+  background: none; border: none; color: var(--text-dim); cursor: pointer;
+  border-radius: 4px; display: grid; place-items: center;
+}
+.artifact-tab-del:hover { color: var(--text); background: var(--grey-750); }
+
 /* Inline card that replaces a file block in the chat and opens the panel. */
 .artifact-card {
   display: flex; align-items: center; gap: 12px; width: 100%;
@@ -387,6 +411,32 @@ code {
 }
 .input::placeholder { color: var(--text-dim); }
 .input:focus { outline: none; border-color: var(--grey-650); }
+
+/* Attach-files button: matches the input's height, sits left of the textarea. */
+.attach-btn {
+  flex-shrink: 0; display: grid; place-items: center; cursor: pointer;
+  width: 42px; height: 44px; color: var(--text-dim);
+  background: var(--grey-800); border: 1px solid var(--border);
+  border-radius: var(--radius); transition: color 0.12s, border-color 0.12s;
+}
+.attach-btn:hover { color: var(--text); border-color: var(--grey-650); }
+
+/* "Documents (N)" button: reopens the panel after it has been closed. */
+.docs-toggle-btn {
+  flex-shrink: 0; display: flex; align-items: center; gap: 6px; cursor: pointer;
+  height: 44px; padding: 0 12px; color: var(--text-mid);
+  background: var(--grey-800); border: 1px solid var(--border);
+  border-radius: var(--radius); transition: color 0.12s, border-color 0.12s;
+}
+.docs-toggle-btn:hover { color: var(--text); border-color: var(--grey-650); }
+/* The display:flex above would otherwise override the [hidden] attribute. */
+.docs-toggle-btn[hidden] { display: none; }
+.docs-toggle-count { font-size: 13px; font-weight: 600; }
+
+/* Whole composer highlights while a file is dragged over it. */
+.composer.drop-target {
+  outline: 2px dashed var(--grey-650); outline-offset: -6px; border-radius: var(--radius);
+}
 
 /* Buttons */
 .primary-btn {

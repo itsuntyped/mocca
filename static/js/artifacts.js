@@ -11,7 +11,7 @@
 // artifact. That round-trip is the part small local models struggle with, so we
 // prove the detection + panel first and add it later if it earns its keep.
 
-import { el, escapeHtml } from "./dom.js";
+import { escapeHtml } from "./dom.js";
 import { fileSvg } from "./icons.js";
 
 // Languages we treat as "a file worth opening in the panel". This (and
@@ -184,9 +184,11 @@ function cardHtml(a) {
   );
 }
 
-// Replace placeholder paragraphs in a rendered bubble with real artifact cards,
-// wiring each to open the panel. Call right after setting the bubble's innerHTML.
-export function mountArtifactCards(bubble) {
+// Replace placeholder paragraphs in a rendered bubble with real artifact cards.
+// Each card, when clicked, calls onOpen(filename) so the caller can open the
+// corresponding persisted document in the side panel (see documents.js). Call
+// right after setting the bubble's innerHTML.
+export function mountArtifactCards(bubble, onOpen) {
   if (!bubble.innerHTML.includes("@@ARTIFACT:")) return;
   bubble.innerHTML = bubble.innerHTML.replace(
     /<p>@@ARTIFACT:(art-\d+)@@<\/p>/g,
@@ -196,61 +198,7 @@ export function mountArtifactCards(bubble) {
     },
   );
   for (const card of bubble.querySelectorAll(".artifact-card")) {
-    card.onclick = () => openArtifact(card.dataset.artifactId);
+    const a = registry.get(card.dataset.artifactId);
+    card.onclick = () => onOpen && onOpen(a ? a.filename : "");
   }
-}
-
-// Open an artifact in the side panel.
-export function openArtifact(id) {
-  const a = registry.get(id);
-  if (!a) return;
-  // Blank when the name is unknown; the language is shown in the chat card.
-  el("artifact-title").textContent = a.filename;
-  const editor = el("artifact-editor");
-  editor.value = a.content;
-  // Persist edits back to the registry so copy/download use the latest text.
-  editor.oninput = () => { a.content = editor.value; };
-  el("artifact-panel").classList.remove("hidden");
-  el("artifact-panel").dataset.current = id;
-  document.querySelector(".app").classList.add("panel-open");
-}
-
-export function closeArtifact() {
-  el("artifact-panel").classList.add("hidden");
-  document.querySelector(".app").classList.remove("panel-open");
-}
-
-// Copy the current panel content to the clipboard.
-export async function copyArtifact() {
-  try {
-    await navigator.clipboard.writeText(el("artifact-editor").value);
-  } catch {
-    // The clipboard API can be blocked; fall back to selecting the text.
-    el("artifact-editor").select();
-  }
-}
-
-// Download the current panel content as a file named after the artifact (or an
-// "untitled" fallback when the name is unknown).
-export function downloadArtifact() {
-  const a = registry.get(el("artifact-panel").dataset.current);
-  if (!a) return;
-  const blob = new Blob([el("artifact-editor").value], { type: "text/plain" });
-  const url = URL.createObjectURL(blob);
-  const link = document.createElement("a");
-  link.href = url;
-  link.download = a.filename || "untitled." + a.ext;
-  link.click();
-  URL.revokeObjectURL(url);
-}
-
-// The artifact currently shown in the panel, with its live (possibly hand-edited)
-// content - or null if the panel is closed. The chat sends this with the next
-// message so the model can build on the file's real, current state.
-export function currentOpenArtifact() {
-  const panel = el("artifact-panel");
-  if (panel.classList.contains("hidden")) return null;
-  const a = registry.get(panel.dataset.current);
-  if (!a) return null;
-  return { title: a.filename, content: el("artifact-editor").value };
 }

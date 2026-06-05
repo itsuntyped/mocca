@@ -41,8 +41,9 @@ from src import config, database, memory_extractor, tool_loop
 from src.routes.chat import (
     _ENGINE_ROLES,
     _collapse_code_blocks,
+    _documents_manifest,
     _memory_block,
-    _open_file_block,
+    _write_back_documents,
 )
 
 log = logging.getLogger("mocca.eval")
@@ -62,10 +63,11 @@ class Turn:
 
 @dataclass
 class RunResult:
-    """One full run of a scenario: every turn, plus the memories left behind."""
+    """One full run of a scenario: every turn, plus the memories and documents left."""
 
     turns: list[Turn]
     memories: list[dict[str, Any]]
+    documents: list[dict[str, Any]] = field(default_factory=list)
 
     @property
     def last(self) -> Turn:
@@ -170,6 +172,30 @@ def no_memories() -> Check:
     return Check("stores no memory", lambda r: not r.memories)
 
 
+def document_contains(filename: str, needle: str) -> Check:
+    """The stored document ``filename`` contains ``needle`` (an edit landed)."""
+    fn, low = filename.lower(), needle.lower()
+    return Check(
+        f"document {filename} contains '{needle}'",
+        lambda r: any(
+            d["filename"].lower() == fn and low in d["content"].lower() for d in r.documents
+        ),
+    )
+
+
+def document_any_contains(needle: str) -> Check:
+    """Some stored document contains ``needle`` (filename-agnostic edit check).
+
+    For cases where the document's name isn't known ahead of time - e.g. a file
+    the model generated and named itself.
+    """
+    low = needle.lower()
+    return Check(
+        f"some document contains '{needle}'",
+        lambda r: any(low in d["content"].lower() for d in r.documents),
+    )
+
+
 # --- Scenario ---------------------------------------------------------------
 
 @dataclass
@@ -188,11 +214,10 @@ class Scenario:
     checks: list[Check]
     judge: str | None = None
     seed_memories: list[tuple[str, str]] = field(default_factory=list)
-    # Parallel to ``messages``: the file the user has open in the editor for that
-    # turn, as ``(title, content)`` - or None (the default for any turn without an
-    # entry). Drives the same open-file context the live route injects, so the
-    # artifact-editing behaviour can be evaluated end to end.
-    open_files: list[tuple[str, str] | None] = field(default_factory=list)
+    # Documents attached to the chat before the conversation, as ``(filename,
+    # content)`` pairs. Seeded into the session's document store, so the model can
+    # read them with read_document and edit them - exactly the production flow.
+    documents: list[tuple[str, str]] = field(default_factory=list)
 
 
 # --- Running a scenario -----------------------------------------------------
@@ -217,7 +242,12 @@ async def run_once(model: str, scenario: Scenario, *, temperature: float) -> Run
     sid = session["id"]
     turns: list[Turn] = []
 
-    for idx, user_text in enumerate(scenario.messages):
+    # Attach the scenario's documents to the session, so the model can read them
+    # with read_document and edit them - exactly the production flow.
+    for filename, content in scenario.documents:
+        database.create_document(sid, filename, content)
+
+    for user_text in scenario.messages:
         database.add_message(sid, "user", user_text)
         database.set_session_model(sid, model)
 
@@ -227,17 +257,17 @@ async def run_once(model: str, scenario: Scenario, *, temperature: float) -> Run
             block = _memory_block(database.list_memories())
             system_text = f"{system_text}\n\n{block}" if system_text else block
 
-        # Open-file context for this turn, mirroring routes/chat.py exactly: inject
-        # the file as authoritative and strip stale full-file copies from history.
-        open_file = scenario.open_files[idx] if idx < len(scenario.open_files) else None
-        editing_file = bool(open_file and open_file[1].strip())
-        if editing_file:
-            system_text += "\n\n" + _open_file_block(open_file[0], open_file[1])
+        # Document context, mirroring routes/chat.py: list the attached filenames
+        # (read on demand via the tool) and strip stale full-file copies from
+        # history so an edit builds on the freshly-read version.
+        docs = database.list_documents(sid)
+        if docs:
+            system_text += "\n\n" + _documents_manifest(docs)
 
         messages: list[dict[str, str]] = []
         if system_text:
             messages.append({"role": "system", "content": system_text})
-        if editing_file:
+        if docs:
             for m in history:
                 if m["role"] == "assistant":
                     messages.append({**m, "content": _collapse_code_blocks(m["content"])})
@@ -256,7 +286,7 @@ async def run_once(model: str, scenario: Scenario, *, temperature: float) -> Run
         calls: list[dict[str, Any]] = []
         results: list[dict[str, Any]] = []
         pending: dict[str, dict] = {}
-        async for event in tool_loop.run(model, messages, options=options):
+        async for event in tool_loop.run(model, messages, options=options, session_id=sid):
             if "chunk" in event:
                 collected.append(event["chunk"])
             elif "tool_call" in event:
@@ -268,18 +298,27 @@ async def run_once(model: str, scenario: Scenario, *, temperature: float) -> Run
                 results.append({"name": res["name"], "result": res["result"]})
 
         reply = "".join(collected)
+        edited_document = False
         if reply:
             database.add_message(sid, "assistant", reply)
+            # Persist any returned file as a document, like the live route, so an
+            # edit scenario can assert the stored document changed.
+            edited_document = _write_back_documents(sid, reply)
 
-        # Extraction: same gate as production (skip file-edit turns), but awaited
+        # Extraction: same gate as production (skip document-edit turns), awaited
         # so we can assert on it.
-        if settings.enable_memory and not editing_file and memory_extractor.looks_personal(user_text):
+        if (settings.enable_memory and not edited_document
+                and memory_extractor.looks_personal(user_text)):
             convo = database.get_messages(sid)
             await memory_extractor.extract_and_store(model, convo)
 
         turns.append(Turn(user=user_text, answer=reply, tool_calls=calls, tool_results=results))
 
-    return RunResult(turns=turns, memories=database.list_memories())
+    return RunResult(
+        turns=turns,
+        memories=database.list_memories(),
+        documents=database.list_documents(sid),
+    )
 
 
 @dataclass

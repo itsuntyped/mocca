@@ -73,6 +73,18 @@
       </section>
 
       <form id="composer" class="composer">
+        <!-- Hidden input drives the attach button; drops are handled on the form. -->
+        <input
+          id="file-input"
+          type="file"
+          multiple
+          hidden
+          accept=".md,.markdown,.txt,.text,.json,.jsonc,.yaml,.yml,.toml,.ini,.conf,.cfg,.csv,.tsv,.xml,.html,.htm,.css,.scss,.sass,.js,.jsx,.ts,.tsx,.py,.sh,.bash,.zsh,.sql,.c,.cpp,.h,.hpp,.java,.go,.rs,.rb,.php,.env,.log"
+        />
+        <button id="attach" type="button" class="attach-btn" title="Attach files" aria-label="Attach files"></button>
+        <!-- Reopen the documents panel after it has been closed (shown only when
+             documents exist and the panel is hidden). -->
+        <button id="docs-toggle" type="button" class="docs-toggle-btn" hidden title="Show documents" aria-label="Show documents"></button>
         <textarea
           id="input"
           class="input"
@@ -84,8 +96,8 @@
       </form>
     </main>
 
-    <!-- Artifact panel: file-like assistant output opens here as an editor. -->
-    <aside id="artifact-panel" class="artifact-panel hidden" aria-label="Artifact">
+    <!-- Document panel: attached/AI-authored files open here as tabbed editors. -->
+    <aside id="artifact-panel" class="artifact-panel hidden" aria-label="Documents">
       <div class="artifact-head">
         <span id="artifact-title" class="artifact-title">file</span>
         <div class="artifact-actions">
@@ -94,6 +106,7 @@
           <button id="artifact-close" type="button" title="Close" aria-label="Close"></button>
         </div>
       </div>
+      <div id="artifact-tabs" class="artifact-tabs"></div>
       <textarea id="artifact-editor" class="artifact-editor" spellcheck="false"></textarea>
     </aside>
   </div>
@@ -131,6 +144,10 @@
           <input type="number" id="set-nthreads" step="1" min="0" />
         </label>
       </div>
+
+      <label>Unload idle model after (minutes, 0 = never)
+        <input type="number" id="set-idle-unload" step="1" min="0" />
+      </label>
 
       <label>Log level
         <select id="set-loglevel">
