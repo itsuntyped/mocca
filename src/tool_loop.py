@@ -29,7 +29,7 @@ import logging
 import re
 from typing import Any, AsyncIterator
 
-from . import config, engine
+from . import config, engine, tool_router
 from .tools import registry
 
 log = logging.getLogger("mocca.toolloop")
@@ -155,14 +155,16 @@ async def run(
     settings = config.get()
     # Offer only the tool categories relevant to the user's latest message. The
     # verbose tool schemas dominate decision latency on CPU, so narrowing them for
-    # a clearly-scoped request (e.g. a bare calculation) is a big speed-up;
-    # ambiguous requests fall back to all enabled categories (see registry).
+    # a clearly-scoped request (e.g. a bare calculation) is a big speed-up. The
+    # router asks the model which categories the message needs (a cheap pass over
+    # a compact menu, not the full schemas); it falls back to keyword routing when
+    # the engine is unavailable or its reply can't be parsed (see tool_router).
     user_text = next((m["content"] for m in reversed(messages) if m.get("role") == "user"), "")
     # All local tools are always available; web search is the one toggle. (Memory
     # is no longer a tool - durable facts are captured by background extraction
     # in memory_extractor; see the chat route.)
     active = registry.active_categories(settings.enable_web_search)
-    categories = registry.relevant_categories(user_text, active)
+    categories = await tool_router.choose_categories(model_name, user_text, active)
     schemas = registry.schemas(categories)
 
     # No tools to offer (none enabled, or engine missing) -> plain streamed turn.

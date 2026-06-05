@@ -95,6 +95,18 @@ class TestRegistry(unittest.TestCase):
         # Ordinary chat must offer no tools, so a tool-happy model stays quiet.
         self.assertEqual(self._relevant("hello there, nice to meet you"), set())
 
+    # Category menu (what the model-based router sees instead of full schemas).
+    def test_category_descriptions_all(self):
+        desc = registry.category_descriptions()
+        # Every category gets a non-empty, one-line blurb built from its tools.
+        self.assertEqual(set(desc), set(registry.categories()))
+        for blurb in desc.values():
+            self.assertTrue(blurb.strip())
+
+    def test_category_descriptions_subset(self):
+        desc = registry.category_descriptions(["math"])
+        self.assertEqual(set(desc), {"math"})
+
     # Execution.
     def test_execute_calculator(self):
         out = asyncio.run(registry.execute("calculator", {"expression": "6 * 7"}))

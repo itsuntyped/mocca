@@ -168,8 +168,33 @@ def schemas(enabled_categories: list[str]) -> list[dict[str, Any]]:
     return [t.schema() for t in enabled_tools(enabled_categories)]
 
 
+def category_descriptions(target_categories: list[str] | None = None) -> dict[str, str]:
+    """A short, human-readable blurb per category, built from its tools.
+
+    This is what the model-based tool router (``src/tool_router.py``) shows the
+    model instead of the full, verbose JSON schemas: a one-line description of
+    each capability is plenty to decide relevance, and a fraction of the size, so
+    routing stays cheap. The blurb is just the category's tool descriptions (each
+    is "one sentence", per ``Tool``) joined together. Pass ``target_categories``
+    to limit the result to those; omit it for every category.
+    """
+    wanted = set(target_categories) if target_categories is not None else None
+    grouped: dict[str, list[str]] = {}
+    for tool in _TOOLS.values():
+        if wanted is not None and tool.category not in wanted:
+            continue
+        grouped.setdefault(tool.category, []).append(tool.description.strip())
+    return {cat: " ".join(descs) for cat, descs in grouped.items()}
+
+
 def relevant_categories(text: str, enabled_categories: list[str]) -> list[str]:
-    """Pick the enabled categories the message actually signals a need for.
+    """Pick the enabled categories the message signals a need for (keyword router).
+
+    This is the lightweight keyword/structural router. It is no longer the primary
+    path - ``tool_router.choose_categories`` asks the model instead - but it stays
+    as the fallback the router degrades to when the engine is unavailable or its
+    reply can't be parsed, so a tool is never hidden just because one LLM call
+    hiccuped.
 
     Returns only the categories whose signals match (keywords, or structural cues
     like a bare arithmetic expression or a URL). When nothing matches it returns

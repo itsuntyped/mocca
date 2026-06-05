@@ -146,6 +146,17 @@ SCENARIOS: list[Scenario] = [
         messages=["hey there, how's your day going?"],
         checks=[no_tools()],
     ),
+    # Guards the model-based router specifically: a question that clearly needs a
+    # live lookup but contains NO routing keyword ("search", "look up", a URL).
+    # The old keyword router would offer no tools here; the model router should
+    # still pick web. Asserts routing only (the tool_call precedes execution), so
+    # it passes even when the live search errors. (Touches the network.)
+    Scenario(
+        name="keywordless-web-routing",
+        area="tools",
+        messages=["who is the current secretary-general of the united nations?"],
+        checks=[called_tool("web_search")],
+    ),
     Scenario(
         name="weather-routing",
         area="tools",
