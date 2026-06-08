@@ -259,13 +259,16 @@ function prettyModelName(name) {
   return name.replace(/\.gguf$/i, "");
 }
 
-// Switch the active tab in the Models modal.
+// Switch the active tab in the Models modal. Scoped to #models-modal so it
+// doesn't reach into the settings modal's tabs (which reuse the .tab class).
 export function switchTab(name) {
-  for (const tab of document.querySelectorAll(".tab")) {
+  for (const tab of document.querySelectorAll("#models-modal .tab")) {
     tab.classList.toggle("active", tab.dataset.tab === name);
   }
+  // Toggle .active (CSS shows/hides via visibility); the panels are stacked in
+  // one grid cell, so all keep reserving height and the modal stays put.
   for (const panel of ["browse", "manual", "installed"]) {
-    el(`tab-${panel}`).classList.toggle("hidden", panel !== name);
+    el(`tab-${panel}`).classList.toggle("active", panel === name);
   }
 }
 

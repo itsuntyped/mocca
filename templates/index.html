@@ -125,58 +125,79 @@
     <form method="dialog" class="modal-body">
       <h2>Settings</h2>
 
-      <label>System prompt
-        <textarea id="set-system" rows="3"></textarea>
-      </label>
+      <div class="tabs">
+        <button type="button" class="tab active" data-tab="general">General</button>
+        <button type="button" class="tab" data-tab="generation">Generation</button>
+        <button type="button" class="tab" data-tab="engine">Engine</button>
+      </div>
 
-      <div class="row">
-        <label>Temperature
-          <input type="number" id="set-temp" step="0.1" min="0" max="2" />
+      <!-- The panels are stacked in one grid cell (see CSS) so the modal always
+           sizes to the tallest tab; switching tabs only toggles visibility, so
+           the nav and modal height never jump. -->
+      <div class="tab-stack">
+      <!-- Tab: general app behaviour -->
+      <div id="set-tab-general" class="tab-panel active">
+        <label>System prompt
+          <textarea id="set-system" rows="3"></textarea>
         </label>
-        <label>Top-p
-          <input type="number" id="set-topp" step="0.05" min="0" max="1" />
+
+        <label class="check-row">
+          <input type="checkbox" id="set-web-search" />
+          Enable web search
         </label>
-        <label>Max tokens (≤0 = until full)
-          <input type="number" id="set-maxtokens" step="1" min="-1" />
+
+        <label>Memory
+          <button type="button" id="open-memory" class="ghost-btn">Manage memory</button>
+        </label>
+
+        <label>Messages per page (chat loads more as you scroll up)
+          <input type="number" id="set-msgs-per-page" step="1" min="1" />
+        </label>
+
+        <label>Log level
+          <select id="set-loglevel">
+            <option>DEBUG</option><option>INFO</option>
+            <option>WARNING</option><option>ERROR</option>
+          </select>
         </label>
       </div>
 
-      <h3>Engine (applied on next model load)</h3>
-      <div class="row">
-        <label>Context size
-          <input type="number" id="set-nctx" step="256" min="512" />
-        </label>
-        <label>GPU layers (0 = CPU)
-          <input type="number" id="set-ngpu" step="1" min="0" />
-        </label>
-        <label>CPU threads (0 = auto)
-          <input type="number" id="set-nthreads" step="1" min="0" />
-        </label>
+      <!-- Tab: sampling controls (per request) -->
+      <div id="set-tab-generation" class="tab-panel">
+        <p class="hint">How the model samples each reply.</p>
+        <div class="row">
+          <label>Temperature
+            <input type="number" id="set-temp" step="0.1" min="0" max="2" />
+          </label>
+          <label>Top-p
+            <input type="number" id="set-topp" step="0.05" min="0" max="1" />
+          </label>
+          <label>Max tokens (≤0 = until full)
+            <input type="number" id="set-maxtokens" step="1" min="-1" />
+          </label>
+        </div>
       </div>
 
-      <label>Unload idle model after (minutes, 0 = never)
-        <input type="number" id="set-idle-unload" step="1" min="0" />
-      </label>
+      <!-- Tab: engine (llama.cpp) load-time controls -->
+      <div id="set-tab-engine" class="tab-panel">
+        <p class="hint">Applied on the next model load.</p>
+        <div class="row">
+          <label>Context size
+            <input type="number" id="set-nctx" step="256" min="512" />
+          </label>
+          <label>GPU layers (0 = CPU)
+            <input type="number" id="set-ngpu" step="1" min="0" />
+          </label>
+          <label>CPU threads (0 = auto)
+            <input type="number" id="set-nthreads" step="1" min="0" />
+          </label>
+        </div>
 
-      <label>Messages per page (chat loads more as you scroll up)
-        <input type="number" id="set-msgs-per-page" step="1" min="1" />
-      </label>
-
-      <label>Log level
-        <select id="set-loglevel">
-          <option>DEBUG</option><option>INFO</option>
-          <option>WARNING</option><option>ERROR</option>
-        </select>
-      </label>
-
-      <h3>Capability</h3>
-      <label class="check-row">
-        <input type="checkbox" id="set-web-search" />
-        Enable web search
-      </label>
-
-      <h3>Memory</h3>
-      <button type="button" id="open-memory" class="ghost-btn">Manage memory</button>
+        <label>Unload idle model after (minutes, 0 = never)
+          <input type="number" id="set-idle-unload" step="1" min="0" />
+        </label>
+      </div>
+      </div><!-- /.tab-stack -->
 
       <div class="modal-actions">
         <button value="cancel" class="ghost-btn">Cancel</button>
@@ -231,8 +252,12 @@
         <button class="tab" data-tab="installed">Installed</button>
       </div>
 
+      <!-- Panels are stacked in one grid cell (see .tab-stack) so the modal
+           always sizes to the tallest tab and the nav doesn't jump when switching.
+           The catalog and installed lists are height-capped, so that stays sane. -->
+      <div class="tab-stack">
       <!-- Tab: popular one-click downloads (sourced live from Hugging Face) -->
-      <div id="tab-browse" class="tab-panel">
+      <div id="tab-browse" class="tab-panel active">
         <div class="catalog-head">
           <p class="hint">
             Popular, capable GGUF models from Hugging Face. The badge shows how
@@ -245,7 +270,7 @@
       </div>
 
       <!-- Tab: manual Hugging Face download -->
-      <div id="tab-manual" class="tab-panel hidden">
+      <div id="tab-manual" class="tab-panel">
         <p class="hint">
           Download any GGUF file from
           <a href="https://huggingface.co/models?library=gguf" target="_blank" rel="noopener">Hugging Face</a>.
@@ -261,9 +286,10 @@
       </div>
 
       <!-- Tab: installed models -->
-      <div id="tab-installed" class="tab-panel hidden">
+      <div id="tab-installed" class="tab-panel">
         <ul id="installed-models" class="installed-models"><!-- injected --></ul>
       </div>
+      </div><!-- /.tab-stack -->
 
       <!-- Shared download progress (visible across tabs while downloading) -->
       <div id="pull-progress" class="pull-progress hidden">

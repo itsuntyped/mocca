@@ -593,6 +593,24 @@ code {
 }
 .tab.active { color: var(--text); border-bottom-color: var(--text); }
 
+/* Settings tab panels: each panel stacks its fields with the same rhythm the
+   modal body gives its own direct children (the fields here are nested one level
+   deeper, so they need their own column gap). Scoped to the settings modal so the
+   Models modal's panels keep their existing block layout. */
+#settings-modal .tab-panel { display: flex; flex-direction: column; gap: 16px; }
+/* The Manage-memory button is the field's control, so don't stretch it full width. */
+#settings-modal label > .ghost-btn { align-self: flex-start; }
+
+/* Stack all panels into one grid cell so the area always sizes to the TALLEST
+   tab. The inactive panels stay laid out (visibility, not display:none) so they
+   keep reserving their height - this is what stops the modal, and so the tab nav,
+   from jumping up/down when you switch to a shorter or taller tab. Shared by the
+   Settings and Models modals (their content lists are height-capped, so the
+   tallest tab stays a sane size). */
+.tab-stack { display: grid; }
+.tab-stack > .tab-panel { grid-area: 1 / 1; visibility: hidden; }
+.tab-stack > .tab-panel.active { visibility: visible; }
+
 /* Responsive (desktop-first): the rules above are the large-screen layout; the
    mobile bar and sidebar drawer below appear only at the narrow breakpoint. */
 

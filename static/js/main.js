@@ -3,7 +3,7 @@ import { loadSidebar, createSession, createFolder, openSidebar, closeSidebar } f
 import { enableRootDrop, enableComposerDrop } from "./dragdrop.js";
 import { sendMessage, loadOlderMessages } from "./chat.js";
 import { openModels, pullManual, switchTab, checkHealth, loadModels, cancelDownload, refreshCatalog } from "./models.js";
-import { loadSettings, saveSettings } from "./settings.js";
+import { loadSettings, saveSettings, switchSettingsTab } from "./settings.js";
 import { openMemory, toggleMemory, clearMemories } from "./memory.js";
 import { closeDocumentPanel, copyActiveDocument, downloadActiveDocument, uploadFiles, showDocumentPanel } from "./documents.js";
 import { copyIcon, downloadIcon, closeIcon, attachIcon, fileSvg } from "./icons.js";
@@ -13,7 +13,11 @@ function boot() {
   el("new-chat").onclick = createSession;
   el("new-folder").onclick = createFolder;
   el("open-models").onclick = openModels;
-  el("open-settings").onclick = () => { loadSettings(); el("settings-modal").showModal(); };
+  el("open-settings").onclick = () => {
+    loadSettings();
+    switchSettingsTab("general");  // Always open on the first tab.
+    el("settings-modal").showModal();
+  };
 
   // Dropping a chat onto the list background (not a folder) moves it to root.
   enableRootDrop();
@@ -88,8 +92,13 @@ function boot() {
   el("pull-cancel").onclick = cancelDownload;
   el("refresh-catalog").onclick = refreshCatalog;
   el("close-models").onclick = () => el("models-modal").close();
-  for (const tab of document.querySelectorAll(".tab")) {
+  // Scope each modal's tabs to itself: both reuse the .tab class, so an unscoped
+  // selector would wire the settings tabs to the Models switcher and vice versa.
+  for (const tab of document.querySelectorAll("#models-modal .tab")) {
     tab.onclick = () => switchTab(tab.dataset.tab);
+  }
+  for (const tab of document.querySelectorAll("#settings-modal .tab")) {
+    tab.onclick = () => switchSettingsTab(tab.dataset.tab);
   }
 
   // Document panel: icons live in icons.js, so paint them in here, then wire

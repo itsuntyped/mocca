@@ -1,6 +1,23 @@
 import { el } from "./dom.js";
 import { api } from "./api.js";
 
+// The settings modal's tabs. Kept separate from the Models modal's tab switcher
+// (models.js) so the two don't toggle each other's panels - both reuse the same
+// .tab/.tab-panel styles, so the switching must be scoped per modal.
+const SETTINGS_TABS = ["general", "generation", "engine"];
+
+export function switchSettingsTab(name) {
+  const modal = el("settings-modal");
+  for (const tab of modal.querySelectorAll(".tab")) {
+    tab.classList.toggle("active", tab.dataset.tab === name);
+  }
+  // Toggle .active (CSS shows/hides via visibility); the panels are stacked in
+  // one grid cell, so all of them keep reserving height and the modal stays put.
+  for (const t of SETTINGS_TABS) {
+    el(`set-tab-${t}`).classList.toggle("active", t === name);
+  }
+}
+
 // Populate the settings form from the backend.
 export async function loadSettings() {
   const s = await api("/api/settings");
