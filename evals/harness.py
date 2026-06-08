@@ -156,6 +156,15 @@ def memory_contains(needle: str) -> Check:
     )
 
 
+def memory_lacks(needle: str) -> Check:
+    """No surviving memory row contains ``needle`` (e.g. a fact was pruned)."""
+    low = needle.lower()
+    return Check(
+        f"memory lacks '{needle}'",
+        lambda r: not any(low in m["content"].lower() for m in r.memories),
+    )
+
+
 def memory_category(cat: str) -> Check:
     return Check(
         f"memory of category '{cat}'",
@@ -311,6 +320,9 @@ async def run_once(model: str, scenario: Scenario, *, temperature: float) -> Run
                 and memory_extractor.looks_personal(user_text)):
             convo = database.get_messages(sid)
             await memory_extractor.extract_and_store(model, convo)
+            # Mirror production: forget facts this turn made obsolete. Awaited
+            # (after extraction) so a scenario can assert on the pruned table.
+            await memory_extractor.prune_stale_memories(model, convo)
 
         turns.append(Turn(user=user_text, answer=reply, tool_calls=calls, tool_results=results))
 

@@ -405,11 +405,16 @@ async def chat(req: ChatRequest) -> StreamingResponse:
                 if (settings.enable_memory and not edited_document
                         and memory_extractor.looks_personal(req.message)):
                     convo = database.get_messages(req.session_id)
-                    task = asyncio.create_task(
-                        memory_extractor.extract_and_store(req.model, convo)
-                    )
-                    _bg_tasks.add(task)
-                    task.add_done_callback(_bg_tasks.discard)
+                    # Two focused passes on the same gate: one captures new durable
+                    # facts, the other forgets ones this turn contradicted or the
+                    # user asked us to drop (e.g. "not into Elixir anymore").
+                    for coro in (
+                        memory_extractor.extract_and_store(req.model, convo),
+                        memory_extractor.prune_stale_memories(req.model, convo),
+                    ):
+                        task = asyncio.create_task(coro)
+                        _bg_tasks.add(task)
+                        task.add_done_callback(_bg_tasks.discard)
         yield sse({"done": True})
 
     return StreamingResponse(event_stream(), media_type="text/event-stream")

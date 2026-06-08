@@ -30,6 +30,7 @@ from .harness import (
     memory_category,
     memory_contains,
     memory_count_at_least,
+    memory_lacks,
     no_memories,
     no_tools,
     tool_arg_contains,
@@ -113,6 +114,32 @@ SCENARIOS: list[Scenario] = [
         area="memory",
         messages=["I changed the introduction, can you add a quick start section to my readme?"],
         checks=[no_memories()],
+    ),
+    # --- Memory: prune facts a turn made obsolete ----------------------------
+    # The mirror of capture: a preference that is replaced, or one the user asks
+    # us to drop, must be forgotten - while compatible facts stay put.
+    Scenario(
+        name="prune-replaced-preference",
+        area="memory",
+        messages=["honestly im not into Elixir anymore, ive switched to React and prefer it now"],
+        seed_memories=[("The user loves the Elixir programming language.", "preference")],
+        checks=[memory_lacks("Elixir")],
+        judge="The reply should acknowledge the switch to React without arguing.",
+    ),
+    Scenario(
+        name="prune-explicit-forget",
+        area="memory",
+        messages=["please forget that I live in Berlin"],
+        seed_memories=[("The user lives in Berlin.", "location")],
+        checks=[memory_lacks("Berlin")],
+    ),
+    Scenario(
+        name="prune-keeps-compatible-fact",
+        area="memory",
+        # Adding a new, compatible interest must NOT wipe the existing one.
+        messages=["i also really enjoy bouldering these days"],
+        seed_memories=[("The user likes hiking.", "preference")],
+        checks=[memory_contains("hiking")],
     ),
     # --- Tools: routing ------------------------------------------------------
     Scenario(
