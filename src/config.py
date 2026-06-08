@@ -71,6 +71,13 @@ class Settings:
     # Verbosity of the application log. One of: DEBUG, INFO, WARNING, ERROR.
     log_level: str = "INFO"
 
+    # --- Chat display ------------------------------------------------------
+    # How many messages a single "page" of the chat shows. The web UI renders
+    # the most recent page and lazily loads older pages as the user scrolls up
+    # (infinite scroll). Display-only: the model always receives the full
+    # conversation regardless of this value (see routes/chat.py).
+    messages_per_page: int = 15
+
     # --- Tools -------------------------------------------------------------
     # All local tools are always available to the AI. The only user-facing
     # switch is web search (the one network capability): on by default, but the

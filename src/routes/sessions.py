@@ -7,7 +7,7 @@ from typing import Any
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
-from .. import database
+from .. import config, database
 
 router = APIRouter()
 
@@ -45,6 +45,22 @@ async def get_session(session_id: str) -> dict[str, Any]:
     if session is None:
         raise HTTPException(status_code=404, detail="Session not found")
     return session
+
+
+@router.get("/api/sessions/{session_id}/messages")
+async def get_session_messages(
+    session_id: str, before: int | None = None
+) -> dict[str, Any]:
+    """Return one page of displayable messages for the infinite scroller.
+
+    Without ``before`` this is the most recent page; pass the ``seq`` of the
+    oldest message currently shown to fetch the page just before it. The page
+    size is the user's ``messages_per_page`` setting.
+    """
+    if database.get_session(session_id) is None:
+        raise HTTPException(status_code=404, detail="Session not found")
+    limit = config.get().messages_per_page
+    return database.get_messages_page(session_id, before_seq=before, limit=limit)
 
 
 @router.patch("/api/sessions/{session_id}")

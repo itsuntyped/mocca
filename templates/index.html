@@ -72,6 +72,15 @@
         </div>
       </section>
 
+      <!-- Floating "jump to latest" button: appears when the chat is scrolled
+           up, sits centered just above the composer (see main.js). -->
+      <button id="scroll-down" type="button" class="scroll-down-btn" title="Jump to latest" aria-label="Jump to latest">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <line x1="12" y1="5" x2="12" y2="19" />
+          <polyline points="19 12 12 19 5 12" />
+        </svg>
+      </button>
+
       <form id="composer" class="composer">
         <!-- Hidden input drives the attach button; drops are handled on the form. -->
         <input
@@ -147,6 +156,10 @@
 
       <label>Unload idle model after (minutes, 0 = never)
         <input type="number" id="set-idle-unload" step="1" min="0" />
+      </label>
+
+      <label>Messages per page (chat loads more as you scroll up)
+        <input type="number" id="set-msgs-per-page" step="1" min="1" />
       </label>
 
       <label>Log level

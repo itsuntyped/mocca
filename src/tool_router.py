@@ -59,6 +59,8 @@ _ROUTER_INSTRUCTIONS = (
     "real-world facts - a current office-holder or leader, the latest or newest "
     "of something, recent events, prices, specific people, companies, products, "
     "or places - choose web, EVEN IF you think you already know the answer.\n"
+    "- Choose web whenever the message contains a link or URL, or asks you to "
+    "open, visit, read, or check a page (the page must actually be fetched).\n"
     "- Choose math for arithmetic or unit conversions, time for the current date "
     "or time, files to read the user's saved files, youtube for a YouTube video, "
     "weather for weather, shipping to track a parcel.\n"
@@ -111,6 +113,23 @@ def _parse(text: str, valid: set[str]) -> list[str] | None:
     return sorted(selected)
 
 
+def _ensure_url_web(categories: list[str], user_text: str, active: list[str]) -> list[str]:
+    """Guarantee a pasted URL gets the web category, whatever the model decided.
+
+    A bare link ("look at this: <url>", or even "visit the url <url>") is an
+    unambiguous "read this page" request, but a small model routing only on the
+    message text often fails to pick web - so fetch_url was never offered and the
+    model answered the page from imagination. The keyword router has always forced
+    web for a URL (registry.url_needs_web); the model router lost that guarantee
+    when it became the primary path, so we reinstate it deterministically here.
+    Only applies when web is actually enabled.
+    """
+    if "web" in active and "web" not in categories and registry.url_needs_web(user_text):
+        log.debug("Message contains a URL; forcing 'web' category into scope")
+        return sorted({*categories, "web"})
+    return categories
+
+
 async def choose_categories(
     model_name: str,
     user_text: str,
@@ -122,14 +141,15 @@ async def choose_categories(
     plus the network ones when web search is on). We ask the model which of those
     the latest message needs and return that subset. Falls back to the keyword
     router (``registry.relevant_categories``) when the engine is unavailable or
-    the reply can't be parsed.
+    the reply can't be parsed. A pasted URL always forces web in (see
+    ``_ensure_url_web``), regardless of the model's choice.
     """
     active = list(active_categories)
     if not active or not engine.is_available():
         # Nothing to route, or no engine to ask - the keyword router handles both
         # (and returns [] for an empty/greeting case), so behaviour is unchanged
         # from the pre-router build when the engine isn't installed.
-        return registry.relevant_categories(user_text, active)
+        return _ensure_url_web(registry.relevant_categories(user_text, active), user_text, active)
 
     convo = [
         {"role": "system", "content": _ROUTER_INSTRUCTIONS.format(menu=_menu(active))},
@@ -140,11 +160,11 @@ async def choose_categories(
         reply = await engine.complete(model_name, convo, options=opts)
     except Exception as exc:  # noqa: BLE001 - any engine failure -> keyword fallback
         log.warning("Tool router failed (%s); falling back to keyword routing", exc)
-        return registry.relevant_categories(user_text, active)
+        return _ensure_url_web(registry.relevant_categories(user_text, active), user_text, active)
 
     selected = _parse(reply, set(active))
     if selected is None:
         log.debug("Router reply unparseable (%r); falling back to keyword routing", reply)
-        return registry.relevant_categories(user_text, active)
+        return _ensure_url_web(registry.relevant_categories(user_text, active), user_text, active)
     log.debug("Router selected categories: %s", selected)
-    return selected
+    return _ensure_url_web(selected, user_text, active)

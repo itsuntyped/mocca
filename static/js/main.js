@@ -1,7 +1,7 @@
 import { el, autoGrow } from "./dom.js";
 import { loadSidebar, createSession, createFolder, openSidebar, closeSidebar } from "./sidebar.js";
 import { enableRootDrop, enableComposerDrop } from "./dragdrop.js";
-import { sendMessage } from "./chat.js";
+import { sendMessage, loadOlderMessages } from "./chat.js";
 import { openModels, pullManual, switchTab, checkHealth, loadModels, cancelDownload, refreshCatalog } from "./models.js";
 import { loadSettings, saveSettings } from "./settings.js";
 import { openMemory, toggleMemory, clearMemories } from "./memory.js";
@@ -53,6 +53,25 @@ function boot() {
   // Reopen the documents panel after it has been closed.
   el("docs-toggle").innerHTML = fileSvg() + '<span class="docs-toggle-count"></span>';
   el("docs-toggle").onclick = showDocumentPanel;
+
+  // Chat scrolling: scrolling near the top lazily loads the previous page of
+  // messages (infinite scroll up); a floating button appears once the view is
+  // away from the bottom and jumps back to the most recent message.
+  const messages = el("messages");
+  const scrollDown = el("scroll-down");
+  // Show the "jump to latest" button only when scrolled meaningfully up.
+  const refreshScrollDown = () => {
+    const distanceFromBottom =
+      messages.scrollHeight - messages.scrollTop - messages.clientHeight;
+    scrollDown.classList.toggle("visible", distanceFromBottom > 120);
+  };
+  messages.addEventListener("scroll", () => {
+    if (messages.scrollTop < 80) loadOlderMessages();
+    refreshScrollDown();
+  });
+  scrollDown.onclick = () => {
+    messages.scrollTop = messages.scrollHeight;
+  };
 
   // Settings modal.
   el("save-settings").onclick = saveSettings;

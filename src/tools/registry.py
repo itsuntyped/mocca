@@ -191,6 +191,17 @@ def category_descriptions(target_categories: list[str] | None = None) -> dict[st
     return {cat: " ".join(descs) for cat, descs in grouped.items()}
 
 
+def url_needs_web(text: str) -> bool:
+    """True when the message carries a plain web URL that fetch_url should read.
+
+    The single source of truth for the "a pasted URL means web" signal, shared by
+    the keyword router (below) and the model router's deterministic override (see
+    tool_router). A YouTube link is excluded: it has its own transcript tool, so
+    we don't also pull the page's HTML.
+    """
+    return bool(_URL.search(text or "")) and not _YOUTUBE.search(text or "")
+
+
 def relevant_categories(text: str, enabled_categories: list[str]) -> list[str]:
     """Pick the enabled categories the message signals a need for (keyword router).
 
@@ -219,12 +230,11 @@ def relevant_categories(text: str, enabled_categories: list[str]) -> list[str]:
     # Structural signals catch what keywords miss (a bare expression, a URL).
     if "math" in enabled and _ARITHMETIC.search(text):
         selected.add("math")
-    is_youtube = bool(_YOUTUBE.search(text))
-    if "youtube" in enabled and is_youtube:
+    if "youtube" in enabled and _YOUTUBE.search(text):
         selected.add("youtube")
     # A URL routes to web (fetch_url) - unless it's a YouTube link, which the
     # youtube transcript tool handles, so we don't also pull the page's HTML.
-    if "web" in enabled and _URL.search(text) and not is_youtube:
+    if "web" in enabled and url_needs_web(text):
         selected.add("web")
     # A bare tracking-number-shaped token routes to shipping, so a keyword-less
     # follow-up still reaches the tracking tool.

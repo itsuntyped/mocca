@@ -51,24 +51,25 @@ _CATEGORIES = {"identity", "preference", "fact", "location", "job", "goal"}
 _EXTRACT_SYSTEM_PROMPT = (
     "You read a conversation and extract durable facts the USER revealed about "
     "themselves - things worth remembering in future, unrelated chats.\n\n"
-    "Capture: the user's name (however casually they introduce it - 'hey im "
-    "martin' means their name is Martin), where they live, their job, their "
-    "skills or what they work with, family, long-term goals or projects, and "
-    "standing preferences (what they like, dislike, or usually do).\n"
+    "Capture: the user's name (however casually they introduce it - a message "
+    "like 'hey im <name>' or 'yo this is <name>' tells you their name), where "
+    "they live, their job, their skills or what they work with, family, "
+    "long-term goals or projects, and standing preferences (what they like, "
+    "dislike, or usually do).\n"
     "Ignore: what they asked about today, temporary moods or states ('I'm "
     "tired', 'I'm bored'), one-off tasks or requests, opinions on the current "
     "topic, and anything the ASSISTANT said.\n\n"
+    "CRITICAL: Extract ONLY facts the USER actually states in the Conversation "
+    "given below. Never invent a fact, and never copy a name or any detail from "
+    "this instruction - the example here shows the output FORMAT only, it is not "
+    "real data about the user. In particular, do not output a name unless the "
+    "user actually gave one. If the conversation reveals nothing durable about "
+    "the user, return [].\n\n"
     "Output a JSON array of objects with \"text\" (one short third-person "
     "sentence) and \"category\" (one of: identity, preference, fact, location, "
-    "job, goal). Return at most 2 - the most important. If nothing durable was "
-    "revealed, return []. Output ONLY the JSON, no markdown or commentary.\n\n"
-    "Example 1 (durable facts):\n"
-    "Conversation:\n"
-    "User: yo im sam, ive used rust for years\n"
-    "Assistant: Nice to meet you, Sam!\n"
-    "Output: [{\"text\": \"The user's name is Sam.\", \"category\": \"identity\"}, "
-    "{\"text\": \"The user has used Rust for years.\", \"category\": \"fact\"}]\n\n"
-    "Example 2 (a one-off task or edit request reveals nothing durable - return "
+    "job, goal). Return at most 2 - the most important. Output ONLY the JSON, no "
+    "markdown or commentary.\n\n"
+    "Example (a one-off task or edit request reveals nothing durable - return "
     "[], do NOT record what they asked you to do):\n"
     "Conversation:\n"
     "User: I changed the introduction, can you add a quick start section to the README?\n"
@@ -175,6 +176,37 @@ def _fallback_candidates(user_text: str) -> list[dict[str, str]]:
     return out
 
 
+# Boilerplate words that carry no identifying signal in a name/identity fact;
+# stripped before we check the fact is grounded in what the user actually typed.
+_IDENTITY_STOPWORDS = frozenset({
+    "the", "user", "users", "name", "is", "are", "am", "be", "to", "as", "by",
+    "go", "goes", "call", "called", "named", "known", "prefer", "prefers",
+    "like", "likes", "their", "they", "a", "an", "and",
+})
+
+
+def _tokenise(text: str) -> set[str]:
+    """Lowercase alphanumeric word tokens (length >= 2), apostrophes split out."""
+    return {w for w in re.findall(r"[a-z0-9]+", (text or "").lower()) if len(w) >= 2}
+
+
+def _identity_is_grounded(fact_text: str, user_tokens: set[str]) -> bool:
+    """Whether a name/identity fact's distinctive word(s) appear in the user's text.
+
+    Small models sometimes copy a name straight out of the prompt's own
+    examples - e.g. emitting "The user's name is Sam." for a turn where the
+    user never said it. A real name is a word the user actually typed, so we
+    require at least one non-boilerplate word from the fact to be present in the
+    user's recent messages; otherwise the fact is a fabrication and we drop it.
+    Returns True when there's nothing distinctive to verify, so this never
+    blocks a fact it can't reason about.
+    """
+    significant = [w for w in _tokenise(fact_text) if w not in _IDENTITY_STOPWORDS]
+    if not significant:
+        return True
+    return any(w in user_tokens for w in significant)
+
+
 def _recent_pairs(messages: list[dict[str, Any]]) -> list[dict[str, str]]:
     """The last few user/assistant turns (system rows dropped) for extraction."""
     convo = [
@@ -235,6 +267,10 @@ async def extract_and_store(model_name: str, messages: list[dict[str, Any]]) -> 
             log.debug("Memory extraction: no candidates")
             return 0
 
+        # Word tokens the user actually typed, used to reject fabricated names
+        # (a small model can copy a name out of the prompt's own examples).
+        user_tokens = _tokenise(" ".join(m["content"] for m in recent if m["role"] == "user"))
+
         added = 0
         for fact in facts:
             if isinstance(fact, str):
@@ -247,6 +283,11 @@ async def extract_and_store(model_name: str, messages: list[dict[str, Any]]) -> 
             if not text:
                 continue
             category = category if category in _CATEGORIES else "fact"
+            # Drop a name/identity fact the user never actually stated - guards
+            # against the model hallucinating a name from its few-shot example.
+            if category == "identity" and not _identity_is_grounded(text, user_tokens):
+                log.info("Skipping ungrounded identity fact (not in user text): %r", text)
+                continue
             # add_memory dedups (exact + fuzzy); a returned existing row that
             # we didn't just create doesn't count as newly added.
             before = len(database.list_memories())

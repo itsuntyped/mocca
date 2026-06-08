@@ -53,17 +53,87 @@ export function showEmptyState() {
     <p>Pick a model and start chatting. Everything runs locally.</p></div>`;
 }
 
-// Render a full conversation into the message area.
-export function renderMessages(messages) {
+// Build (but don't attach) one message wrapper. `seq` is the server's stable
+// row cursor, stashed on the element so the infinite scroller knows which
+// message is currently the oldest on screen. Freshly streamed bubbles have no
+// seq yet (they aren't persisted until the turn ends) - that's fine, they're
+// always the newest rows and never the scroll anchor.
+function buildMessage(role, content, seq) {
+  const wrap = document.createElement("div");
+  wrap.className = `msg ${role}`;
+  if (seq != null) wrap.dataset.seq = seq;
+  wrap.innerHTML = `<div class="bubble"></div>`;
+  setBubbleContent(wrap.querySelector(".bubble"), role, content);
+  return wrap;
+}
+
+// Jump the message list to the newest message. Instant (never smoothed) and
+// re-asserted on the next frame, so late layout - markdown/fonts settling, or
+// the documents panel opening and reflowing the column narrower right after we
+// scroll - can't leave us stranded above the bottom.
+export function scrollMessagesToBottom() {
+  const box = el("messages");
+  box.scrollTop = box.scrollHeight;
+  requestAnimationFrame(() => { box.scrollTop = box.scrollHeight; });
+}
+
+// Render a freshly fetched page (the latest, or any earlier one) into the box,
+// replacing whatever was there. Resets the scroll cursor to this page and jumps
+// to the bottom (newest message).
+function renderPage(page) {
   const box = el("messages");
   box.innerHTML = "";
-  if (!messages.length) { showEmptyState(); return; }
-  for (const m of messages) {
-    // Tool rows are stored only for the record; we never display them.
-    if (m.role === "tool") continue;
-    addMessageBubble(m.role, m.content);
+  if (!page.messages.length) {
+    showEmptyState();
+    state.oldestSeq = null;
+    state.hasMoreOlder = false;
+    state.expandedHistory = false;
+    return;
   }
-  box.scrollTop = box.scrollHeight;
+  for (const m of page.messages) box.appendChild(buildMessage(m.role, m.content, m.seq));
+  state.oldestSeq = page.messages[0].seq;
+  state.hasMoreOlder = page.has_more;
+  state.expandedHistory = false;
+  scrollMessagesToBottom();
+}
+
+// Fetch and render the most recent page of a session's conversation. This is
+// the entry point used when opening a chat (see sidebar.selectSession).
+export async function loadConversation(sessionId) {
+  state.loadingOlder = false;
+  const page = await api(`/api/sessions/${sessionId}/messages`);
+  renderPage(page);
+}
+
+// Prepend the next older page when the user scrolls to the top. Anchors the
+// viewport over the same content after the box grows, so scrolling up feels
+// continuous rather than jumping. No-op while a fetch is in flight, when no
+// older messages remain, or when no chat is open.
+export async function loadOlderMessages() {
+  if (state.loadingOlder || !state.hasMoreOlder) return;
+  if (!state.currentSessionId || state.oldestSeq == null) return;
+  state.loadingOlder = true;
+  const box = el("messages");
+  const prevHeight = box.scrollHeight;
+  const prevTop = box.scrollTop;
+  try {
+    const page = await api(
+      `/api/sessions/${state.currentSessionId}/messages?before=${state.oldestSeq}`,
+    );
+    if (!page.messages.length) {
+      state.hasMoreOlder = false;
+      return;
+    }
+    const frag = document.createDocumentFragment();
+    for (const m of page.messages) frag.appendChild(buildMessage(m.role, m.content, m.seq));
+    box.insertBefore(frag, box.firstChild);
+    state.oldestSeq = page.messages[0].seq;
+    state.hasMoreOlder = page.has_more;
+    state.expandedHistory = true;  // The next new message collapses back to the latest page.
+    box.scrollTop = prevTop + (box.scrollHeight - prevHeight);
+  } finally {
+    state.loadingOlder = false;
+  }
 }
 
 // Append one message bubble; returns its .bubble element for live streaming.
@@ -71,10 +141,7 @@ export function addMessageBubble(role, content) {
   const box = el("messages");
   el("empty-state")?.remove();
 
-  const wrap = document.createElement("div");
-  wrap.className = `msg ${role}`;
-  wrap.innerHTML = `<div class="bubble"></div>`;
-  setBubbleContent(wrap.querySelector(".bubble"), role, content);
+  const wrap = buildMessage(role, content);
   box.appendChild(wrap);
   box.scrollTop = box.scrollHeight;
   return wrap.querySelector(".bubble");
@@ -88,6 +155,14 @@ export async function sendMessage(text) {
 
   // Auto-create a session on the first message.
   if (!state.currentSessionId) await createSession();
+
+  // If the user had scrolled up and loaded older history, a new interaction
+  // collapses the view back to just the latest page before the new turn is
+  // added - they can scroll up again from there.
+  if (state.expandedHistory) {
+    const page = await api(`/api/sessions/${state.currentSessionId}/messages`);
+    renderPage(page);
+  }
 
   state.sending = true;
   el("send").disabled = true;

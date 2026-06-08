@@ -39,6 +39,11 @@ def _prune(reply: str, convo: list[dict[str, str]]) -> int:
         return asyncio.run(memory_extractor.prune_stale_memories("m", convo))
 
 
+def _extract(reply: str, convo: list[dict[str, str]]) -> int:
+    with mock.patch.object(memory_extractor.engine, "complete", _fake_complete(reply)):
+        return asyncio.run(memory_extractor.extract_and_store("m", convo))
+
+
 class TestPruneStaleMemories(unittest.TestCase):
     def setUp(self):
         database.init_db()
@@ -98,6 +103,43 @@ class TestPruneStaleMemories(unittest.TestCase):
         database.add_memory("The user lives in Berlin.", "location")
         removed = _prune("```json\n[1]\n```", _convo("im not in berlin anymore"))
         self.assertEqual(removed, 1)
+
+
+class TestExtractGrounding(unittest.TestCase):
+    """The identity-grounding guard: a name the user never typed is dropped.
+
+    Small models sometimes copy a name out of the extractor's own few-shot
+    example (the original bug stored "The user's name is Sam." for a turn that
+    never mentioned Sam). extract_and_store rejects an identity fact whose
+    distinctive word isn't present in the user's text.
+    """
+
+    def setUp(self):
+        database.init_db()
+        database.clear_memories()
+
+    def _contents(self) -> list[str]:
+        return [m["content"] for m in database.list_memories()]
+
+    def test_hallucinated_name_is_dropped(self):
+        # The user never says "Sam"; the model copies it from its example.
+        convo = _convo("I'm impressed, you really checked my website? it doesn't look like it.")
+        added = _extract('[{"text": "The user\'s name is Sam.", "category": "identity"}]', convo)
+        self.assertEqual(added, 0)
+        self.assertEqual(self._contents(), [])
+
+    def test_real_name_is_kept(self):
+        convo = _convo("yo im sam, nice to be here")
+        added = _extract('[{"text": "The user\'s name is Sam.", "category": "identity"}]', convo)
+        self.assertEqual(added, 1)
+        self.assertTrue(any("Sam" in c for c in self._contents()))
+
+    def test_non_identity_fact_is_not_grounding_checked(self):
+        # Grounding is scoped to identity facts; other categories pass through
+        # (they get normalised/paraphrased, so token-matching would misfire).
+        convo = _convo("tell me about rust")
+        added = _extract('[{"text": "The user enjoys systems programming.", "category": "preference"}]', convo)
+        self.assertEqual(added, 1)
 
 
 if __name__ == "__main__":

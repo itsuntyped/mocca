@@ -149,6 +149,45 @@ class TestChooseCategories(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(out, [])
         self.assertFalse(called["hit"])
 
+    async def test_url_forces_web_even_when_model_says_none(self):
+        # The reported bug: the model routed [] for a pasted link, so fetch_url
+        # was never offered and it answered the page from imagination. A URL must
+        # deterministically pull web into scope regardless of the model's choice.
+        engine.is_available = lambda: True
+        engine.complete = self._fake_complete("[]")
+        active = registry.active_categories(enable_web_search=True)
+        out = await tool_router.choose_categories(
+            "m.gguf", "look at this: https://www.credly.com/badges/abc", active
+        )
+        self.assertIn("web", out)
+
+    async def test_url_override_unions_with_model_selection(self):
+        # The forced web is added to, not substituted for, what the model picked.
+        engine.is_available = lambda: True
+        engine.complete = self._fake_complete('["time"]')
+        active = registry.active_categories(enable_web_search=True)
+        out = await tool_router.choose_categories(
+            "m.gguf", "compare https://a.example.com to today's date", active
+        )
+        self.assertIn("web", out)
+        self.assertIn("time", out)
+
+    async def test_youtube_link_does_not_force_web(self):
+        # A YouTube link has its own transcript tool; it must not pull web in.
+        engine.is_available = lambda: True
+        engine.complete = self._fake_complete("[]")
+        active = registry.active_categories(enable_web_search=True)
+        out = await tool_router.choose_categories("m.gguf", "https://youtu.be/dQw4w9WgXcQ", active)
+        self.assertNotIn("web", out)
+
+    async def test_url_does_not_force_web_when_web_disabled(self):
+        # With web search turned off, web isn't active, so a URL can't force it on.
+        engine.is_available = lambda: True
+        engine.complete = self._fake_complete("[]")
+        active = registry.active_categories(enable_web_search=False)
+        out = await tool_router.choose_categories("m.gguf", "read https://example.com please", active)
+        self.assertNotIn("web", out)
+
     async def test_routing_is_deterministic_and_capped(self):
         # The router must pin temperature to 0 and cap tokens, regardless of the
         # user's chat settings, so tool choice doesn't swing with temperature.

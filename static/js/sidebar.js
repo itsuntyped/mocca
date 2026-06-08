@@ -2,7 +2,7 @@ import { el, escapeHtml } from "./dom.js";
 import { api } from "./api.js";
 import { state } from "./state.js";
 import { starSvg, chevronSvg, pencilSvg, trashSvg } from "./icons.js";
-import { renderMessages, showEmptyState } from "./chat.js";
+import { loadConversation, showEmptyState, scrollMessagesToBottom } from "./chat.js";
 import { enableChatDrag, enableFolderDrop, enableTouchMove } from "./dragdrop.js";
 import { loadDocuments } from "./documents.js";
 
@@ -192,8 +192,12 @@ async function selectSession(id) {
   const session = await api(`/api/sessions/${id}`);
   if (session.model) el("model-select").value = session.model;
   updateActiveHighlight();
-  renderMessages(session.messages);
+  await loadConversation(id);
+  // Documents load second and may open the side panel, which reflows the chat
+  // column narrower (bubbles re-wrap taller). Re-assert the scroll afterwards so
+  // an opened chat always lands on its newest message, not mid-page.
   await loadDocuments(id);
+  scrollMessagesToBottom();
   closeSidebar();
 }
 

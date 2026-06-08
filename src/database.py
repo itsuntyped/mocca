@@ -351,6 +351,44 @@ def get_messages(session_id: str) -> list[dict[str, Any]]:
     return [dict(r) for r in rows]
 
 
+def get_messages_page(
+    session_id: str, before_seq: int | None = None, limit: int = 15
+) -> dict[str, Any]:
+    """Return one page of *displayable* messages for the infinite scroller.
+
+    The chat UI shows the most recent ``limit`` messages and loads older pages
+    as the user scrolls up. A page is the ``limit`` newest messages whose
+    ``seq`` is below ``before_seq`` (or the very newest when ``before_seq`` is
+    None), returned oldest-first so they can be prepended/appended directly.
+
+    ``seq`` is the row's monotonic rowid: it increases with insertion order
+    (which matches chronological order, since messages are only ever appended),
+    so it doubles as a stable scroll cursor. Tool rows are display-only and are
+    excluded here, so a page is always ``limit`` *visible* bubbles.
+
+    Returns ``{"messages": [...], "has_more": bool}`` where ``has_more`` says
+    whether still-older pages exist.
+    """
+    limit = max(1, limit)
+    params: list[Any] = [session_id]
+    cursor = ""
+    if before_seq is not None:
+        cursor = "AND rowid < ? "
+        params.append(before_seq)
+    params.append(limit + 1)  # One extra row tells us if more pages remain.
+    with _connect() as conn:
+        rows = conn.execute(
+            "SELECT rowid AS seq, role, content, created_at FROM messages "
+            f"WHERE session_id = ? AND role != 'tool' {cursor}"
+            "ORDER BY rowid DESC LIMIT ?",
+            params,
+        ).fetchall()
+    has_more = len(rows) > limit
+    page = [dict(r) for r in rows[:limit]]
+    page.reverse()  # Oldest-first for the UI.
+    return {"messages": page, "has_more": has_more}
+
+
 # --------------------------------------------------------------------------- #
 # Memories (long-term, cross-chat facts about the user)
 # --------------------------------------------------------------------------- #

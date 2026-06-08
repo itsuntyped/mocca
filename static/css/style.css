@@ -190,7 +190,7 @@ code {
 }
 
 /* Chat */
-.chat { flex: 1; display: flex; flex-direction: column; min-width: 0; background: var(--grey-900); }
+.chat { flex: 1; display: flex; flex-direction: column; min-width: 0; background: var(--grey-900); position: relative; }
 
 /*
  * Artifact panel (prototype): file-like assistant output opens here as an
@@ -299,7 +299,10 @@ code {
 }
 .model-select:focus { outline: none; border-color: var(--grey-650); }
 
-.messages { flex: 1; overflow-y: auto; padding: 28px 0; scroll-behavior: smooth; }
+/* No scroll-behavior:smooth here on purpose: programmatic jumps to the bottom
+   (open chat, new message) must land instantly. A smoothed jump animates *through*
+   the top of the list, which would trip the scroll-up "load older" threshold. */
+.messages { flex: 1; overflow-y: auto; padding: 28px 0; }
 
 .empty-state { text-align: center; color: var(--text-dim); margin-top: 16vh; padding: 0 20px; }
 .empty-state .brand-logo {
@@ -432,6 +435,20 @@ code {
 /* The display:flex above would otherwise override the [hidden] attribute. */
 .docs-toggle-btn[hidden] { display: none; }
 .docs-toggle-count { font-size: 13px; font-weight: 600; }
+
+/* "Jump to latest" button: floats centered just above the composer, shown only
+   when the chat is scrolled up (the .visible class is toggled in main.js). */
+.scroll-down-btn {
+  position: absolute; left: 50%; bottom: 100px; transform: translateX(-50%) translateY(8px);
+  z-index: 5; display: grid; place-items: center; cursor: pointer;
+  width: 38px; height: 38px; border-radius: 50%;
+  color: var(--text-mid); background: var(--grey-800); border: 1px solid var(--border);
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.35);
+  opacity: 0; pointer-events: none;
+  transition: opacity 0.15s, transform 0.15s, color 0.12s, border-color 0.12s;
+}
+.scroll-down-btn.visible { opacity: 1; pointer-events: auto; transform: translateX(-50%) translateY(0); }
+.scroll-down-btn:hover { color: var(--text); border-color: var(--grey-650); }
 
 /* Whole composer highlights while a file is dragged over it. */
 .composer.drop-target {

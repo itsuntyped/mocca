@@ -12,4 +12,11 @@ export const state = {
   draggingId: null,      // Id of the chat currently being dragged, or null.
   documents: [],         // Documents attached to the current chat: {id, filename, source, content?}.
   activeDocumentId: null, // Id of the document shown in the side panel, or null.
+
+  // --- Chat pagination (infinite scroll up) ----------------------------------
+  oldestSeq: null,       // `seq` of the oldest message currently rendered (scroll cursor).
+  hasMoreOlder: false,   // Whether still-older messages exist on the server.
+  loadingOlder: false,   // Guard so a single scroll-up doesn't fire many fetches.
+  expandedHistory: false, // True once the user scrolled up and loaded older pages;
+                          // the next new message collapses back to the latest page.
 };
