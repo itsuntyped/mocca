@@ -16,7 +16,7 @@ toggle turns this off to stay fully offline).
 
 ```bash
 python -m venv .venv
-# Windows: .venv\Scripts\Activate.ps1   |   Arch/Linux: source .venv/bin/activate
+# Windows: .venv\Scripts\Activate.ps1   |   Linux/macOS: source .venv/bin/activate
 python scripts/setup.py     # installs deps; auto-picks the best GPU build (NVIDIA/AMD/Intel)
 python scripts/run.py
 ```

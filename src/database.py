@@ -1,8 +1,8 @@
 """SQLite-backed storage for chat sessions and their messages.
 
 Why SQLite: it's in the Python standard library (no extra dependency),
-single-file, and trivially portable between Windows and Arch - which matches
-Mocca's "simple, local, no setup" goal. The schema is five tables:
+single-file, and trivially portable across Windows, Linux, and macOS - which
+matches Mocca's "simple, local, no setup" goal. The schema is five tables:
 
     folders(id, name, created_at, updated_at)
     sessions(id, title, model, folder_id, favorite, created_at, updated_at)

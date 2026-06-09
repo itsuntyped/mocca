@@ -11,6 +11,7 @@ __pycache__/
 .venv/
 .venv-build-cpu/
 .venv-build-cuda/
+.venv-build-vulkan/
 venv/
 env/
 *.egg-info/
