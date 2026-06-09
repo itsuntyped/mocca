@@ -109,16 +109,17 @@ def _known_keys() -> set[str]:
 def _default_gpu_layers() -> int:
     """First-run default for n_gpu_layers.
 
-    On a CUDA (GPU) engine build, offload the whole model by default (99 caps to
-    the model's real layer count in llama.cpp); on a CPU build stay at 0. This is
-    why the CUDA download runs on the GPU out of the box. Only applied when the
-    config file doesn't exist yet, so it never overrides a user's choice. Lazily
-    imports engine to avoid a circular import; engine's own import is cheap (it
-    doesn't load llama_cpp here).
+    On any GPU engine build - CUDA (NVIDIA) or the vendor-neutral Vulkan build
+    (NVIDIA/AMD/Intel) - offload the whole model by default (99 caps to the
+    model's real layer count in llama.cpp); on a CPU build stay at 0. This is why
+    a GPU install runs on the GPU out of the box. Only applied when the config
+    file doesn't exist yet, so it never overrides a user's choice. Lazily imports
+    engine to avoid a circular import; engine's own import is cheap (it doesn't
+    load llama_cpp here).
     """
     try:
         from . import engine
-        return 99 if engine.is_cuda_build() else 0
+        return 99 if engine.is_gpu_build() else 0
     except Exception:  # noqa: BLE001 - detection must never block config creation
         return 0
 

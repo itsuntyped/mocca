@@ -9,21 +9,24 @@ toggle turns this off to stay fully offline).
 
 ## Quick start
 
-> Use **Python 3.11 or 3.12**. These have prebuilt wheels for the inference
-> engine, including the optional GPU (CUDA) build. Newer Python (3.13/3.14) runs
-> fine on CPU but has no prebuilt CUDA wheel yet.
+> **Python 3.11 or 3.12** gives the widest prebuilt-wheel coverage, including the
+> NVIDIA CUDA build. Newer Python (3.13/3.14) has no prebuilt CUDA wheel, but the
+> **Vulkan** GPU build is a `py3-none` wheel that installs on any Python 3.x - so
+> a GPU still works there (and on AMD/Intel).
 
 ```bash
 python -m venv .venv
 # Windows: .venv\Scripts\Activate.ps1   |   Arch/Linux: source .venv/bin/activate
-python scripts/setup.py     # installs deps; auto-picks the GPU build if an NVIDIA GPU is found
+python scripts/setup.py     # installs deps; auto-picks the best GPU build (NVIDIA/AMD/Intel)
 python scripts/run.py
 ```
 
-`scripts/setup.py` installs the dependencies and, if it detects an NVIDIA GPU,
-installs the CUDA build of the engine automatically (otherwise the CPU build).
-Force it either way with `--cuda` / `--cpu`. See [GPU acceleration](#gpu-acceleration-nvidia)
-below. (Plain `pip install -r requirements.txt` still works for a CPU-only setup.)
+`scripts/setup.py` installs the dependencies and auto-picks the engine build for
+your hardware: **CUDA** for an NVIDIA GPU (on Python 3.10-3.12), the vendor-neutral
+**Vulkan** build for an **AMD** or **Intel** GPU (or NVIDIA on a newer Python), or
+the **CPU** build when there's no GPU. Force a choice with `--cuda` / `--vulkan` /
+`--cpu`. See [GPU acceleration](#gpu-acceleration) below. (Plain
+`pip install -r requirements.txt` still works for a CPU-only setup.)
 
 Open <http://localhost:8000>, open **Models**, download a recommended model
 (e.g. *Llama 3.2 3B Instruct*), set it as the **Active model**, and start
@@ -43,26 +46,31 @@ under **Settings -> Capability** turns it off to keep Mocca fully offline. Tool 
 works best with larger, tool-capable models; smaller models still run, just less
 reliably.
 
-## GPU acceleration (NVIDIA)
+## GPU acceleration
 
-Running models on an NVIDIA GPU is far faster than CPU. `python scripts/setup.py`
-sets this up automatically when it detects a GPU, but the details:
+Running models on a GPU is far faster than CPU. `python scripts/setup.py` sets
+this up automatically by detecting your GPU vendor and installing the matching
+prebuilt `llama-cpp-python` wheel - **NVIDIA, AMD, and Intel** are all supported:
 
-- **Python 3.11 or 3.12** is required for the prebuilt CUDA wheel (there are no
-  CUDA wheels for 3.13/3.14 yet). You need a current NVIDIA driver, but **no**
-  system CUDA Toolkit - the runtime comes from pip wheels (`nvidia-*-cu12`),
-  which the app adds to the DLL search path at startup.
-- The CUDA build **defaults GPU layers to 99 on first run** (offloads the whole
-  model), so it uses the GPU out of the box. You can change it in **Settings** -
-  the value caps to the model's real layer count, and partial offload is only
-  needed for models too large for your VRAM. (The CPU build defaults to 0.)
+| Your GPU | Build picked | Notes |
+| --- | --- | --- |
+| NVIDIA (Python 3.10-3.12) | **CUDA** | Fastest. Needs a current NVIDIA driver, but **no** CUDA Toolkit - the runtime comes from pip wheels (`nvidia-*-cu12`), added to the DLL search path at startup. |
+| AMD or Intel (any) <br> NVIDIA (Python 3.13/3.14) | **Vulkan** | Vendor-neutral. Needs only an up-to-date GPU driver (the Vulkan loader, `vulkan-1.dll`, ships with it). The wheel is `py3-none`, so it installs on any Python 3.x. |
+| none | **CPU** | Runs anywhere. |
+
+- Either GPU build **defaults GPU layers to 99 on first run** (offloads the whole
+  model), so it uses the GPU out of the box. Change it in **Settings** - the value
+  caps to the model's real layer count, and partial offload is only needed for
+  models too large for your VRAM. (The CPU build defaults to 0.)
 - Rough VRAM use for a 3B Q4 model is ~2.5 GB, so an 8 GB card has plenty of room
   - you can also raise **Context size** for longer chats.
-- To force or re-run: `python scripts/setup.py --cuda` (or `--cpu`). Verify with
+- To force or re-run: `python scripts/setup.py --cuda` / `--vulkan` / `--cpu`.
+  Verify with
   `python -c "from src import engine; import llama_cpp; print(llama_cpp.llama_supports_gpu_offload())"`
   - it should print `True`.
-- On a newer Python where no CUDA wheel exists, either use 3.11/3.12 or build
-  `llama-cpp-python` from source with the CUDA Toolkit (`-DGGML_CUDA=on`).
+- CUDA is the fastest on NVIDIA, but Vulkan works there too (and is the only
+  prebuilt GPU option on Python 3.13/3.14). Force it with `--vulkan` if you'd
+  rather not install the CUDA runtime wheels.
 
 ## Data
 
@@ -77,23 +85,27 @@ recipient) with PyInstaller. Requires **Python 3.12** installed (`py -3.12`).
 From the project root:
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File scripts\build.ps1            # both variants
+powershell -ExecutionPolicy Bypass -File scripts\build.ps1            # cpu + cuda
 powershell -ExecutionPolicy Bypass -File scripts\build.ps1 -Variant cpu
 powershell -ExecutionPolicy Bypass -File scripts\build.ps1 -Variant cuda
+powershell -ExecutionPolicy Bypass -File scripts\build.ps1 -Variant vulkan
+powershell -ExecutionPolicy Bypass -File scripts\build.ps1 -Variant all     # all three
 ```
 
 This produces one-folder apps under `packaging\windows\dist`:
 
-| Folder        | For                | Notes                                            |
-|---------------|--------------------|--------------------------------------------------|
-| `Mocca`       | Any Windows PC     | CPU build. Smaller.                              |
-| `Mocca-CUDA`  | NVIDIA GPU + driver| Bundles the CUDA runtime, so it's much larger (~1.5 GB). |
+| Folder         | For                  | Notes                                            |
+|----------------|----------------------|--------------------------------------------------|
+| `Mocca`        | Any Windows PC       | CPU build. Smaller.                              |
+| `Mocca-CUDA`   | NVIDIA GPU + driver  | Bundles the CUDA runtime, so it's much larger (~1.5 GB). |
+| `Mocca-Vulkan` | NVIDIA/AMD/Intel GPU | Runs on any vendor's GPU; needs only an up-to-date GPU driver (the Vulkan loader ships with it). No bundled runtime, so it stays small. |
 
 Zip the folder you want and share it. Each variant builds in its own throwaway
-venv (`.venv-build-cpu` / `.venv-build-cuda`) so your development `.venv` is left
-alone; the build also pulls in `pyinstaller`, `pystray`, and `pillow`. The
-CUDA-build recipient still needs an up-to-date NVIDIA driver, but no CUDA Toolkit
-(the runtime DLLs are bundled). The CPU build runs anywhere.
+venv (`.venv-build-<variant>`) so your development `.venv` is left alone; the
+build also pulls in `pyinstaller`, `pystray`, and `pillow`. The CUDA-build
+recipient needs an up-to-date NVIDIA driver (but no CUDA Toolkit - the runtime
+DLLs are bundled); the Vulkan-build recipient needs an up-to-date NVIDIA/AMD/Intel
+driver. The CPU build runs anywhere.
 
 ## Releases & versioning
 

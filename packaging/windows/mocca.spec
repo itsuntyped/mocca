@@ -29,13 +29,14 @@ def _package_dir(name):
         return spec.submodule_search_locations[0]
     return None
 
-# Build variant, set by build.ps1: "cpu" (default) or "cuda". The CUDA variant
-# bundles the CUDA runtime DLLs and produces a separate output folder. Whichever
-# llama-cpp-python build is installed in the build venv is what gets packaged;
-# this flag only controls the extra CUDA runtime DLLs and the output name.
+# Build variant, set by build.ps1: "cpu" (default), "cuda", or "vulkan". Whichever
+# llama-cpp-python build is installed in the build venv is what gets packaged (the
+# binaries glob below grabs its ggml-*.dll automatically). This flag only controls
+# the extra CUDA runtime DLLs (CUDA only) and the output folder name. The Vulkan
+# variant needs no extra DLLs - its loader (vulkan-1.dll) ships with the GPU driver.
 VARIANT = os.environ.get("MOCCA_BUILD_VARIANT", "cpu").lower()
 CUDA = VARIANT == "cuda"
-APP_DIR_NAME = "Mocca-CUDA" if CUDA else "Mocca"
+APP_DIR_NAME = {"cuda": "Mocca-CUDA", "vulkan": "Mocca-Vulkan"}.get(VARIANT, "Mocca")
 
 # Bundle the web assets at the archive root so src/paths.py finds them under
 # sys._MEIPASS, plus the VERSION file so src/version.py reports the right version.

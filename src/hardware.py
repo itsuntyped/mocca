@@ -8,9 +8,11 @@ Mocca uses this for two UI things:
 Detection is deliberately self-contained (no external service, no third-party
 package): RAM comes from the OS (Windows ``GlobalMemoryStatusEx`` via ctypes,
 Linux ``/proc/meminfo``), the CPU name from the registry / ``/proc/cpuinfo``, and
-GPU/VRAM from ``nvidia-smi`` when an NVIDIA driver is present. Anything we can't
-determine is simply omitted - non-NVIDIA GPUs aren't detected, and the whole
-thing degrades to "hardware unknown" rather than ever failing.
+the GPU from ``nvidia-smi`` (NVIDIA, exact name + VRAM) with a vendor-neutral
+fallback - the Windows display-adapter registry, or Linux ``/sys/class/drm`` -
+that also picks up **AMD and Intel** GPUs. Anything we can't determine is simply
+omitted, and the whole thing degrades to "hardware unknown" rather than ever
+failing.
 
 ``detect_system()`` returns a dict shaped like::
 
@@ -18,10 +20,16 @@ thing degrades to "hardware unknown" rather than ever failing.
       "total_ram_gb": 31.9, "available_ram_gb": 17.8,
       "cpu_name": "AMD Ryzen 5 5600X 6-Core Processor", "cpu_cores": 12,
       "has_gpu": True, "gpu_name": "NVIDIA GeForce RTX 3070", "gpu_vram_gb": 8.0,
+      "gpu_vendor": "nvidia",  # or "amd" / "intel" / None
     }
 
 or ``None`` if we couldn't even read system RAM. The result is cached for the
 process lifetime (hardware doesn't change while Mocca runs).
+
+``gpu_vendors()`` is a lighter, build-time helper (used by ``scripts/setup.py``)
+that just reports which GPU vendors are present, so the installer can pick the
+right ``llama-cpp-python`` build (CUDA for NVIDIA, the universal Vulkan wheel for
+AMD/Intel).
 """
 
 from __future__ import annotations
@@ -117,11 +125,42 @@ def _cpu_name() -> str | None:
     return platform.processor() or None
 
 
-def _detect_gpu() -> tuple[bool, str | None, float | None]:
-    """Return (has_gpu, name, vram_gb) for an NVIDIA GPU, via nvidia-smi.
+# Priority when several GPUs are present: a discrete NVIDIA/AMD card beats an
+# Intel integrated GPU; ties break on VRAM. Also the value space for "gpu_vendor".
+_VENDOR_PRIORITY = {"nvidia": 3, "amd": 2, "intel": 1}
 
-    Returns ``(False, None, None)`` when nvidia-smi isn't installed (no NVIDIA
-    driver) or anything goes wrong. AMD/Intel GPUs aren't detected.
+
+def _vendor_from_name(name: str | None) -> str | None:
+    """Classify a GPU's marketing name into a vendor id, or None if unrecognised."""
+    n = (name or "").lower()
+    if any(k in n for k in ("nvidia", "geforce", "rtx", "gtx", "quadro", "tesla")):
+        return "nvidia"
+    if any(k in n for k in ("amd", "radeon", "instinct", "firepro")) or "ati " in n:
+        return "amd"
+    if any(k in n for k in ("intel", "arc ", "iris", "uhd graphics", "hd graphics")):
+        return "intel"
+    return None
+
+
+def _vendor_from_pci(devid: str | None) -> str | None:
+    """Vendor from a PCI id - a Windows MatchingDeviceId (``...VEN_10DE...``) or a
+    Linux sysfs vendor file (``0x10de``)."""
+    d = (devid or "").lower()
+    if "10de" in d:
+        return "nvidia"
+    if "1002" in d:
+        return "amd"
+    if "8086" in d:
+        return "intel"
+    return None
+
+
+def _nvidia_smi() -> tuple[bool, str | None, float | None]:
+    """(has_gpu, name, vram_gb) for an NVIDIA GPU via nvidia-smi, else (False, ...).
+
+    nvidia-smi gives an exact marketing name and accurate VRAM, so it's the
+    preferred source for NVIDIA; the registry/sysfs fallback covers everything
+    else (and NVIDIA cards on a box without the CLI installed).
     """
     exe = shutil.which("nvidia-smi")
     if not exe:
@@ -143,6 +182,130 @@ def _detect_gpu() -> tuple[bool, str | None, float | None]:
         return False, None, None
 
 
+def _windows_gpus() -> list[tuple[str, float | None, str | None]]:
+    """(name, vram_gb, vendor) for each display adapter, from the registry.
+
+    Reads the display-adapter class key; each numbered subkey is one adapter with
+    a ``DriverDesc`` (name) and ``HardwareInformation.qwMemorySize`` (VRAM in
+    bytes - the reliable VRAM source on Windows, unlike WMI's 4 GB-capped field).
+    Adapters whose vendor we can't identify (e.g. "Microsoft Basic Display") are
+    dropped. Vendor-neutral, so it sees AMD and Intel GPUs too.
+    """
+    if os.name != "nt":
+        return []
+    import winreg
+
+    key_path = r"SYSTEM\CurrentControlSet\Control\Class\{4d36e968-e325-11ce-bfc1-08002be10318}"
+
+    def _get(handle, name):
+        try:
+            value, _ = winreg.QueryValueEx(handle, name)
+            return value
+        except OSError:
+            return None
+
+    gpus: list[tuple[str, float | None, str | None]] = []
+    try:
+        base = winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, key_path)
+    except OSError:
+        return []
+    with base:
+        i = 0
+        while True:
+            try:
+                sub = winreg.EnumKey(base, i)
+            except OSError:
+                break
+            i += 1
+            if not sub.isdigit():  # Skip "Properties" and other non-adapter keys.
+                continue
+            try:
+                with winreg.OpenKey(base, sub) as k:
+                    name = _get(k, "DriverDesc")
+                    if not name:
+                        continue
+                    vendor = _vendor_from_name(name) or _vendor_from_pci(_get(k, "MatchingDeviceId"))
+                    if not vendor:
+                        continue
+                    mem = _get(k, "HardwareInformation.qwMemorySize")
+                    if mem is None:
+                        raw = _get(k, "HardwareInformation.MemorySize")
+                        mem = int.from_bytes(raw, "little") if isinstance(raw, bytes) else raw
+                    vram_gb = round(int(mem) / 1024 ** 3, 1) if mem else None
+                    gpus.append((str(name), vram_gb, vendor))
+            except OSError:
+                continue
+    return gpus
+
+
+def _linux_gpus() -> list[tuple[str, float | None, str | None]]:
+    """(name, vram_gb, vendor) for each DRM GPU, from /sys/class/drm.
+
+    The PCI ``vendor`` file identifies AMD/Intel/NVIDIA; AMD also exposes
+    ``mem_info_vram_total`` (bytes). sysfs has no marketing name, so we label by
+    vendor (NVIDIA itself is normally named precisely by nvidia-smi instead).
+    """
+    import glob
+
+    def _read(path: str) -> str | None:
+        try:
+            with open(path, encoding="utf-8") as fh:
+                return fh.read().strip()
+        except OSError:
+            return None
+
+    gpus: list[tuple[str, float | None, str | None]] = []
+    for dev in sorted(glob.glob("/sys/class/drm/card[0-9]/device")):
+        vendor = _vendor_from_pci(_read(os.path.join(dev, "vendor")))
+        if not vendor:
+            continue
+        raw = _read(os.path.join(dev, "mem_info_vram_total"))
+        vram_gb = round(int(raw) / 1024 ** 3, 1) if raw and raw.isdigit() else None
+        name = {"nvidia": "NVIDIA GPU", "amd": "AMD GPU", "intel": "Intel GPU"}[vendor]
+        gpus.append((name, vram_gb, vendor))
+    return gpus
+
+
+def _enumerate_gpus() -> list[tuple[str, float | None, str | None]]:
+    """All detectable GPUs as (name, vram_gb, vendor), via the OS-specific source."""
+    return _windows_gpus() if os.name == "nt" else _linux_gpus()
+
+
+def _detect_gpu() -> tuple[bool, str | None, float | None, str | None]:
+    """Return (has_gpu, name, vram_gb, vendor) for the best GPU present.
+
+    NVIDIA is read from nvidia-smi first (exact name + VRAM); otherwise we fall
+    back to the OS enumeration, which also covers AMD and Intel. Returns
+    ``(False, None, None, None)`` when no GPU can be detected.
+    """
+    ok, name, vram = _nvidia_smi()
+    if ok:
+        return True, name, vram, "nvidia"
+    gpus = _enumerate_gpus()
+    if gpus:
+        # Prefer a discrete card over an integrated one; break ties on VRAM.
+        name, vram, vendor = max(
+            gpus, key=lambda g: (_VENDOR_PRIORITY.get(g[2], 0), g[1] or 0)
+        )
+        return True, name, vram, vendor
+    return False, None, None, None
+
+
+def gpu_vendors() -> set[str]:
+    """Which GPU vendors are present: a subset of ``{'nvidia', 'amd', 'intel'}``.
+
+    A lightweight signal for ``scripts/setup.py`` to choose the engine build,
+    independent of the cached ``detect_system`` result. Empty when no GPU is found.
+    """
+    vendors: set[str] = set()
+    if _nvidia_smi()[0]:
+        vendors.add("nvidia")
+    for _, _, vendor in _enumerate_gpus():
+        if vendor:
+            vendors.add(vendor)
+    return vendors
+
+
 def detect_system(refresh: bool = False) -> dict[str, Any] | None:
     """Detect RAM/CPU/GPU, cached for the process. None if RAM is unreadable."""
     global _system
@@ -156,7 +319,7 @@ def detect_system(refresh: bool = False) -> dict[str, Any] | None:
         _system = None
         return None
 
-    has_gpu, gpu_name, gpu_vram = _detect_gpu()
+    has_gpu, gpu_name, gpu_vram, gpu_vendor = _detect_gpu()
     _system = {
         "total_ram_gb": round(total_ram, 2),
         "available_ram_gb": round(avail_ram, 2) if avail_ram else None,
@@ -165,6 +328,7 @@ def detect_system(refresh: bool = False) -> dict[str, Any] | None:
         "has_gpu": has_gpu,
         "gpu_name": gpu_name,
         "gpu_vram_gb": gpu_vram,
+        "gpu_vendor": gpu_vendor,
     }
     log.info("Detected hardware: %s", summarise(_system))
     return _system

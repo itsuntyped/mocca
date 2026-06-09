@@ -112,13 +112,11 @@ def is_available() -> bool:
         return False
 
 
-def is_cuda_build() -> bool:
-    """Whether the installed llama-cpp-python is a CUDA (GPU) build.
+def _llama_lib_roots() -> list[str]:
+    """Candidate ``llama_cpp`` package roots whose ``lib/`` holds the ggml backends.
 
-    Detected cheaply by the presence of ``ggml-cuda.dll`` in the package's lib
-    folder - via ``find_spec`` so we never import llama_cpp (no DLL load, no CUDA
-    init). Used to pick a sensible first-run default for ``n_gpu_layers``: the
-    CUDA build should offload to the GPU, the CPU build should not.
+    Found via ``find_spec`` so we never import llama_cpp (no DLL load, no GPU
+    init), plus the frozen (PyInstaller) bundle dir as a belt-and-suspenders.
     """
     roots: list[str] = []
     try:
@@ -127,11 +125,43 @@ def is_cuda_build() -> bool:
             roots.extend(spec.submodule_search_locations)
     except Exception:  # noqa: BLE001 - find_spec can raise on odd setups
         pass
-    # Belt and suspenders for a frozen (PyInstaller) build.
     bundle = getattr(sys, "_MEIPASS", None)
     if bundle:
         roots.append(os.path.join(bundle, "llama_cpp"))
-    return any((Path(root) / "lib" / "ggml-cuda.dll").exists() for root in roots)
+    return roots
+
+
+# The ggml backend shared library each GPU build ships, in preference order
+# (CUDA first - if both somehow exist, CUDA is the NVIDIA-optimised one).
+_GPU_BACKEND_LIBS = (
+    ("cuda", ("ggml-cuda.dll", "libggml-cuda.so")),
+    ("vulkan", ("ggml-vulkan.dll", "libggml-vulkan.so")),
+)
+
+
+def gpu_backend() -> str | None:
+    """Which GPU backend the installed llama-cpp-python was built with.
+
+    Returns ``"cuda"`` (NVIDIA), ``"vulkan"`` (NVIDIA/AMD/Intel, vendor-neutral),
+    or ``None`` for a CPU-only build. Detected cheaply by the backend library
+    present in the package's ``lib/`` folder, without importing llama_cpp.
+    """
+    roots = _llama_lib_roots()
+    for backend, libnames in _GPU_BACKEND_LIBS:
+        for root in roots:
+            if any((Path(root) / "lib" / lib).exists() for lib in libnames):
+                return backend
+    return None
+
+
+def is_gpu_build() -> bool:
+    """Whether the installed build can offload to a GPU (CUDA or Vulkan)."""
+    return gpu_backend() is not None
+
+
+def is_cuda_build() -> bool:
+    """Whether the installed build is specifically the CUDA (NVIDIA) one."""
+    return gpu_backend() == "cuda"
 
 
 # Sentinel pushed onto the queue to mark end-of-stream.

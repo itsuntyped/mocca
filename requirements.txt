@@ -33,13 +33,14 @@ python-weather>=2.0
 # source build (which needs CMake + a C compiler). If install fails, either use
 # Python 3.11/3.12 or install a prebuilt wheel - see the project readme.
 #
-# This is the CPU build. For NVIDIA/CUDA GPU acceleration, run
-# 'python scripts/setup.py' instead - it detects the GPU and swaps in the
-# prebuilt CUDA wheel plus the nvidia-*-cu12 runtime. See the readme's
-# "GPU acceleration" section.
+# This is the CPU build. For GPU acceleration, run 'python scripts/setup.py'
+# instead - it detects the GPU and swaps in the right prebuilt wheel: the CUDA
+# wheel (NVIDIA, plus the nvidia-*-cu12 runtime) or the vendor-neutral Vulkan
+# wheel (NVIDIA/AMD/Intel). See the readme's "GPU acceleration" section.
 llama-cpp-python>=0.2.79
 
 # Note: hardware detection (RAM/CPU/GPU, for the model-fit hints) needs no extra
-# dependency - it uses the OS directly and nvidia-smi when present (see
-# src/hardware.py). The downloadable model catalog is fetched from the public
-# Hugging Face API with httpx (above); no client library or API key required.
+# dependency - it uses the OS directly, nvidia-smi for NVIDIA, and the display
+# registry / sysfs for AMD/Intel (see src/hardware.py). The downloadable model
+# catalog is fetched from the public Hugging Face API with httpx (above); no
+# client library or API key required.

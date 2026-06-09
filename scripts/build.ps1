@@ -1,22 +1,25 @@
-# Build the Windows Mocca.exe with PyInstaller, in a CPU and/or CUDA variant.
+# Build the Windows Mocca.exe with PyInstaller, in a CPU / CUDA / Vulkan variant.
 #
 # Run from anywhere:
-#   powershell -ExecutionPolicy Bypass -File scripts\build.ps1            # both
+#   powershell -ExecutionPolicy Bypass -File scripts\build.ps1            # cpu + cuda
 #   powershell -ExecutionPolicy Bypass -File scripts\build.ps1 -Variant cpu
 #   powershell -ExecutionPolicy Bypass -File scripts\build.ps1 -Variant cuda
+#   powershell -ExecutionPolicy Bypass -File scripts\build.ps1 -Variant vulkan
+#   powershell -ExecutionPolicy Bypass -File scripts\build.ps1 -Variant all     # all three
 #
 # Output (one-folder apps under packaging\windows\dist):
-#   Mocca\Mocca.exe        - CPU build, runs on any Windows PC.
-#   Mocca-CUDA\Mocca.exe   - GPU build, needs an NVIDIA GPU + driver (much larger,
-#                            it bundles the CUDA runtime).
+#   Mocca\Mocca.exe          - CPU build, runs on any Windows PC.
+#   Mocca-CUDA\Mocca.exe     - NVIDIA GPU build (bundles the CUDA runtime, much larger).
+#   Mocca-Vulkan\Mocca.exe   - NVIDIA/AMD/Intel GPU build via Vulkan; needs only an
+#                              up-to-date GPU driver (the Vulkan loader ships with it).
 # Zip the folder you want and hand it over. Build config: packaging\windows\mocca.spec.
 #
-# Each variant builds in its own throwaway venv (.venv-build-cpu / .venv-build-cuda)
-# so your development .venv is never touched. Requires Python 3.12 (the prebuilt
-# engine wheels - including CUDA - target 3.11/3.12).
+# Each variant builds in its own throwaway venv (.venv-build-<variant>) so your
+# development .venv is never touched. Requires Python 3.12 (the prebuilt CUDA
+# wheel targets 3.11/3.12; the Vulkan/CPU wheels work on any 3.x).
 
 param(
-    [ValidateSet("cpu", "cuda", "both")]
+    [ValidateSet("cpu", "cuda", "vulkan", "both", "all")]
     [string]$Variant = "both"
 )
 
@@ -24,9 +27,15 @@ $ErrorActionPreference = "Stop"
 $root = Split-Path -Parent $PSScriptRoot          # Project root (scripts\ is one level down).
 $pkg = Join-Path $root "packaging\windows"
 
-$variants = if ($Variant -eq "both") { @("cpu", "cuda") } else { @($Variant) }
+$variants = switch ($Variant) {
+    "both" { @("cpu", "cuda") }
+    "all"  { @("cpu", "cuda", "vulkan") }
+    default { @($Variant) }
+}
 
-function Get-DirName($v) { if ($v -eq "cuda") { "Mocca-CUDA" } else { "Mocca" } }
+function Get-DirName($v) {
+    switch ($v) { "cuda" { "Mocca-CUDA" } "vulkan" { "Mocca-Vulkan" } default { "Mocca" } }
+}
 
 foreach ($v in $variants) {
     Write-Host "`n=== Building Mocca ($v) ===" -ForegroundColor Cyan
@@ -73,4 +82,4 @@ foreach ($v in $variants) {
 
 Write-Host "`nDone. Output under packaging\windows\dist:" -ForegroundColor Cyan
 foreach ($v in $variants) { Write-Host ("  " + (Get-DirName $v) + "  ($v)") }
-Write-Host "Zip a folder to share. CPU build runs anywhere; the CUDA build needs an NVIDIA GPU + driver."
+Write-Host "Zip a folder to share. CPU build runs anywhere; CUDA needs an NVIDIA GPU + driver; Vulkan runs on NVIDIA/AMD/Intel with an up-to-date GPU driver."

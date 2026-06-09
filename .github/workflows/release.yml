@@ -26,7 +26,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        variant: [cpu, cuda]
+        variant: [cpu, cuda, vulkan]
     steps:
       - uses: actions/checkout@v4
 
@@ -54,7 +54,7 @@ jobs:
         shell: pwsh
         run: |
           $version = (Get-Content VERSION).Trim()
-          $dir = if ('${{ matrix.variant }}' -eq 'cuda') { 'Mocca-CUDA' } else { 'Mocca' }
+          $dir = switch ('${{ matrix.variant }}') { 'cuda' { 'Mocca-CUDA' } 'vulkan' { 'Mocca-Vulkan' } default { 'Mocca' } }
           $zip = "Mocca-$version-windows-${{ matrix.variant }}.zip"
           Compress-Archive -Path "packaging/windows/dist/$dir/*" -DestinationPath $zip -Force
           "zip=$zip" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
